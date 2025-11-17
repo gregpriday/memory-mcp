@@ -913,7 +913,7 @@ npm run build
    ```json
    {
      "production": {
-       "databaseUrl": "postgresql://user:password@ep-cool-darkness-123456.us-east-2.aws.neon.tech/neondb"
+       "databaseUrl": "postgresql://user:password@ep-cool-darkness-123456.us-east-2.aws.neon.tech/neondb?sslmode=require"
      }
    }
    ```

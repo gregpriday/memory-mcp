@@ -11,6 +11,8 @@ This is a **pre-release Memory MCP server** using PostgreSQL + pgvector for sema
 - **Legacy code can be removed freely** - don't preserve old patterns or references
 - **Experimentation is encouraged** - the architecture is still being refined
 
+For high-level goals around the simulated brain and imperfect memory behavior, review `docs/SIMULATED_BRAIN.md`.
+
 ## Commands
 
 ### Development
