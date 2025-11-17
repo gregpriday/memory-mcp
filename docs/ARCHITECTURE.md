@@ -29,21 +29,25 @@ Memory MCP is an **agentic architecture** where an LLM (GPT-4/GPT-5) orchestrate
 ### Core Principles
 
 **Natural Language Interface**
+
 - Users communicate with the system through conversational commands
 - The agent interprets intent and translates it into appropriate operations
 - No need to understand underlying database structures or APIs
 
 **Tool-Based Execution**
+
 - The agent uses internal tools (`search_memories`, `upsert_memories`, `delete_memories`, etc.)
 - Tools provide structured capabilities with clear contracts
 - The agent reasons about which tools to use and in what order
 
 **Semantic Understanding**
+
 - Memory storage uses embeddings for semantic search
 - Memories are enriched with metadata and relationships
 - The system understands context, not just keywords
 
 **Autonomous Operation**
+
 - The agent makes decisions about memory extraction, deduplication, and consolidation
 - Complex workflows (like file ingestion) happen automatically
 - The system adapts to user intent without explicit procedural instructions
@@ -51,12 +55,14 @@ Memory MCP is an **agentic architecture** where an LLM (GPT-4/GPT-5) orchestrate
 ### Why Agentic?
 
 Traditional memory systems require users to:
+
 1. Structure data upfront
 2. Write queries in specific formats
 3. Manually manage relationships and metadata
 4. Implement custom deduplication logic
 
 The agentic approach allows users to:
+
 1. Describe what they want in natural language
 2. Let the agent determine how to extract and store information
 3. Rely on the agent to maintain memory health through refinement
@@ -89,10 +95,12 @@ The Memory MCP system is organized into four distinct layers, each with clear re
 **Purpose:** Expose memory capabilities as MCP tools to Claude Desktop or other MCP clients.
 
 **Location:**
+
 - `src/index.ts` - Server entry point
 - `src/server/MemoryServer.ts` - Tool registration and request handling
 
 **Responsibilities:**
+
 - Implement MCP protocol using `@modelcontextprotocol/sdk`
 - Register and document available tools
 - Handle tool invocation requests
@@ -100,6 +108,7 @@ The Memory MCP system is organized into four distinct layers, each with clear re
 - Format responses in MCP-compatible structure
 
 **Tools Exposed:**
+
 1. **memorize** (alias: **remember**) - Store information from text or files
 2. **recall** - Search and retrieve memories
 3. **forget** - Delete memories based on criteria
@@ -122,14 +131,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'memorize',
       description: 'Store memories from text or files...',
-      inputSchema: { /* tool parameters */ }
+      inputSchema: {
+        /* tool parameters */
+      },
     },
     // ... other tools
-  ]
+  ],
 }));
 ```
 
 **Input/Output:**
+
 - Input: Natural language commands with optional metadata
 - Output: Structured JSON results with status, data, and user-friendly messages
 
@@ -140,6 +152,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 **Location:** `src/memory/MemoryController.ts`
 
 **Responsibilities:**
+
 - Resolve index names (default index logic)
 - Load project-specific system messages from files
 - Validate file access permissions
@@ -148,6 +161,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 - Handle errors gracefully with clear messages
 
 **Security Boundaries:**
+
 - `IndexResolver` - Validates index names and provides default logic
 - `ProjectFileLoader` - Restricts file reads to project root with size limits
 
@@ -173,6 +187,7 @@ async handleMemorizeTool(args: MemorizeToolArgs): Promise<any> {
 ```
 
 **Data Flow:**
+
 ```
 MCP Tool Request
     ↓
@@ -190,11 +205,13 @@ Formatted MCP Response
 **Purpose:** LLM-powered reasoning and tool orchestration for complex memory operations.
 
 **Location:**
+
 - `src/llm/MemoryAgent.ts` - Main agent class
 - `src/llm/agent/runtime/ToolRuntime.ts` - Internal tool execution
 - `src/llm/agent/operations/` - Complex operation implementations
 
 **Responsibilities:**
+
 - Interpret natural language instructions
 - Decide which internal tools to use and in what order
 - Execute multi-step workflows (e.g., file ingestion with chunking)
@@ -203,6 +220,7 @@ Formatted MCP Response
 - Orchestrate memory refinement (consolidation, decay, cleanup)
 
 **Internal Tools (via ToolRuntime):**
+
 1. **search_memories** - Semantic + keyword search with filters
 2. **get_memories** - Fetch specific memories by ID
 3. **upsert_memories** - Store or update memories with metadata
@@ -211,6 +229,7 @@ Formatted MCP Response
 6. **analyze_text** - Fast text analysis using GPT-5-mini (configurable via `MEMORY_ANALYSIS_MODEL`)
 
 **Complex Operations:**
+
 - `MemorizeOperation` - Handles file reading, chunking, deduplication, and batch storage
 - Future: `RefineOperation`, `ForgetOperation` for complex logic
 
@@ -246,6 +265,7 @@ export class MemorizeOperation {
 ```
 
 **Agent Modes:**
+
 - **Memorize Mode:** Extract facts, classify memory types, store with metadata
 - **Recall Mode:** Search, retrieve, synthesize answers
 - **Forget Mode:** Identify and remove memories safely
@@ -256,11 +276,13 @@ export class MemorizeOperation {
 **Purpose:** Pure data access against PostgreSQL with pgvector for semantic search.
 
 **Location:**
+
 - `src/memory/MemoryRepositoryPostgres.ts` - PostgreSQL implementation
 - `src/memory/IMemoryRepository.ts` - Backend-agnostic interface
 - `src/memory/PoolManager.ts` - Connection pooling per project
 
 **Responsibilities:**
+
 - Generate embeddings for semantic search
 - Execute semantic + keyword hybrid search
 - Store and retrieve memory records with metadata
@@ -270,6 +292,7 @@ export class MemorizeOperation {
 - Provide database diagnostics
 
 **Key Capabilities:**
+
 - **Embedding Generation:** Uses OpenAI's `text-embedding-3-small` (1536 dimensions)
 - **Semantic Search:** Cosine similarity using pgvector's `<=>` operator
 - **Hybrid Search:** Combines semantic (vector) + keyword (text search) with configurable weights
@@ -281,7 +304,11 @@ export class MemorizeOperation {
 ```typescript
 // src/memory/IMemoryRepository.ts
 export interface IMemoryRepository {
-  upsertMemories(index: string, memories: MemoryToUpsert[], metadata?: Partial<MemoryMetadata>): Promise<string[]>;
+  upsertMemories(
+    index: string,
+    memories: MemoryToUpsert[],
+    metadata?: Partial<MemoryMetadata>
+  ): Promise<string[]>;
   searchMemories(index: string, query: string, options?: SearchOptions): Promise<SearchResult[]>;
   updateAccessStats(index: string, ids: string[], options?: { topN?: number }): Promise<void>;
   deleteMemories(index: string, ids: string[]): Promise<number>;
@@ -292,6 +319,7 @@ export interface IMemoryRepository {
 ```
 
 **Database Schema:**
+
 ```sql
 CREATE TABLE memories (
   id UUID PRIMARY KEY,
@@ -313,6 +341,7 @@ CREATE INDEX idx_memories_embedding ON memories
 The Memory MCP uses a **layered prompt system** that composes prompts from multiple sources at runtime.
 
 **Location:**
+
 - `src/llm/PromptManager.ts` - Composition logic
 - `prompts/` - Prompt templates
 
@@ -342,12 +371,14 @@ The Memory MCP uses a **layered prompt system** that composes prompts from multi
 ### Prompt Files
 
 **memory-base.txt**
+
 - Defines agent identity and core responsibilities
 - Establishes tool-first principles
 - Contains placeholders for host and project context
 - Used in all operations
 
 **Mode-Specific Prompts**
+
 - `memory-memorize.txt` - Extraction and storage guidance
 - `memory-recall.txt` - Search and synthesis guidance
 - `memory-forget.txt` - Safe deletion guidance
@@ -355,6 +386,7 @@ The Memory MCP uses a **layered prompt system** that composes prompts from multi
 - `memory-analyzer.txt` - Text analysis prompt (used by `analyze_text` tool)
 
 **memory-memorize-classify.txt**
+
 - Classification guide for semantic memory typing
 - Decision tree: Self → Belief → Pattern → Episodic → Semantic
 - Enables type-aware decay and consolidation strategies
@@ -387,12 +419,14 @@ composePrompt(promptNames: string[], projectContext?: string): string {
 ### Context Injection Points
 
 **Host Context (`MEMORY_MCP_SYSTEM_MESSAGE`)**
+
 - Describes the role of the calling agent (e.g., "You are AppsDash's memory system")
 - Guides what information should be stored or avoided
 - Loaded from environment variable (inline text or file path)
 - Injected into `[HOST CONTEXT START]` section in `memory-base.txt`
 
 **Project Context (`projectSystemMessagePath`)**
+
 - Project-specific instructions (e.g., "Focus on customer support transcripts")
 - Loaded from file path provided in tool arguments
 - Validated by `ProjectFileLoader` (must be within project root)
@@ -400,9 +434,9 @@ composePrompt(promptNames: string[], projectContext?: string): string {
 
 ### Model Selection
 
-| Prompt | Model | Rationale |
-|--------|-------|-----------|
-| memory-base + mode prompts | GPT-5 | Complex reasoning, tool orchestration |
+| Prompt                         | Model      | Rationale                                                                     |
+| ------------------------------ | ---------- | ----------------------------------------------------------------------------- |
+| memory-base + mode prompts     | GPT-5      | Complex reasoning, tool orchestration                                         |
 | memory-analyzer (analyze_text) | GPT-5-mini | Fast, cost-effective text analysis (configurable via `MEMORY_ANALYSIS_MODEL`) |
 
 ---
@@ -412,6 +446,7 @@ composePrompt(promptNames: string[], projectContext?: string): string {
 The Memory MCP supports multiple isolated projects, each with its own PostgreSQL database.
 
 **Location:**
+
 - `src/config/backend.ts` - Configuration loader
 - `config/projects.json` - Project registry
 - `src/memory/PoolManager.ts` - Per-project connection pooling
@@ -469,9 +504,9 @@ export function loadBackendConfig() {
   return {
     activeProject: {
       projectId: activeProjectId,
-      databaseUrl: projectConfig.databaseUrl
+      databaseUrl: projectConfig.databaseUrl,
     },
-    registry
+    registry,
   };
 }
 
@@ -497,12 +532,14 @@ Memories in the system have dynamic priority scores that evolve based on access 
 ### Priority Calculation
 
 **Formula Components:**
+
 - **Recency Score:** `exp(-ageDays / 30)` (exponential decay, 30-day half-life)
 - **Usage Score:** `log(1 + accessCount) / log(101)` (logarithmic saturation at ~100 accesses)
 - **Importance Score:** `{high: 1.0, medium: 0.6, low: 0.3}`
 - **Emotion Score:** `emotion?.intensity ?? 0.0` (optional emotional context)
 
 **Type-Specific Weights:**
+
 - **Self/Belief:** 10% recency + 40% importance + 30% usage + 20% emotion (identity persists)
 - **Pattern:** 25% recency + 30% importance + 30% usage + 15% emotion (patterns decay slower)
 - **Episodic:** 40% recency + 20% importance + 20% usage + 20% emotion (episodes fade faster)
@@ -515,6 +552,7 @@ Final priority is clamped to `[0.0, 1.0]`.
 ### Access Tracking
 
 When memories are retrieved (via `searchMemories` or `getMemory`), the system updates:
+
 - `accessCount` - Incremented by 1
 - `lastAccessedAt` - Set to current timestamp
 - `currentPriority` - Recalculated using priority formula
@@ -522,6 +560,7 @@ When memories are retrieved (via `searchMemories` or `getMemory`), the system up
 This is a **fire-and-forget** operation (doesn't block search results).
 
 **Configuration:**
+
 - `MEMORY_ACCESS_TRACKING_TOP_N` - Number of top results to track (default: 10)
 - `MEMORY_ACCESS_TRACKING_ENABLED` - Enable/disable access tracking (default: true)
 - `MEMORY_ACCESS_PRIORITY_BOOST` - Priority boost multiplier (default: configured per memory type)
@@ -531,24 +570,28 @@ This is a **fire-and-forget** operation (doesn't block search results).
 The `refine_memories` tool analyzes stored memories and generates actions to maintain memory health.
 
 **Operation Types:**
+
 1. **Consolidation** - Merge duplicates, create summaries, link related memories
 2. **Decay** - Reprioritize based on current access patterns
 3. **Cleanup** - Identify deletion candidates (low priority, superseded, obsolete)
 4. **Reflection** - Synthesize beliefs from pattern clusters
 
 **Action Types:**
+
 - **UPDATE** - Modify metadata (priority, relationships, tags)
 - **MERGE** - Consolidate multiple memories into one summary
 - **CREATE** - Generate new derived/summary memories
 - **DELETE** - Remove memories (with safety checks)
 
 **Safety Rules (via `RefinementActionValidator.ts`):**
+
 - Cannot delete system memories (`source: 'system'`)
 - Cannot create duplicate memories
 - Must preserve required metadata fields
 - Must maintain valid relationship types
 
 **Lifecycle States:**
+
 - `tentative` - Newly created, subject to consolidation
 - `stable` - Accessed multiple times, established
 - `canonical` - High-value memories with minimum priority floor (0.4)
@@ -560,7 +603,7 @@ The `refine_memories` tool analyzes stored memories and generates actions to mai
 const plan: RefinementAction[] = await agent.refineMemories({
   index: 'main',
   operation: 'consolidation',
-  budget: 50
+  budget: 50,
 });
 
 // Validator checks safety rules
@@ -581,6 +624,7 @@ for (const action of plan) {
 The Memory MCP uses OpenAI's embedding models for semantic search.
 
 **Location:**
+
 - `src/config/embedding.ts` - Model configuration
 - `src/llm/EmbeddingService.ts` - Embedding generation
 
@@ -588,10 +632,10 @@ The Memory MCP uses OpenAI's embedding models for semantic search.
 
 **Supported Models:**
 
-| Model | Dimensions | Use Case |
-|-------|------------|----------|
-| text-embedding-3-small | 1536 | Default (fast, cost-effective) |
-| text-embedding-3-large | 3072 | Higher quality (more expensive) |
+| Model                  | Dimensions | Use Case                        |
+| ---------------------- | ---------- | ------------------------------- |
+| text-embedding-3-small | 1536       | Default (fast, cost-effective)  |
+| text-embedding-3-large | 3072       | Higher quality (more expensive) |
 
 **Configuration:**
 
@@ -612,6 +656,7 @@ CREATE TABLE memories (
 ```
 
 **Runtime Validation:**
+
 - Embedding service validates dimensions against configured model
 - Throws clear error on mismatch: `Expected 1536 dimensions but got 3072`
 - Prevents silent data corruption
@@ -661,6 +706,7 @@ The Memory MCP provides a simple DSL for filtering memories by metadata, which i
 ### Filter DSL Syntax
 
 **Supported Operators:**
+
 - `CONTAINS` - Check if array contains value
 - `=` or `==` - Exact equality
 
@@ -872,7 +918,7 @@ throw new MemorySearchError(
     status: 'search_error',
     durationMs,
     retryCount,
-    lastError
+    lastError,
   },
   { cause: originalError }
 );
@@ -896,7 +942,7 @@ export function loadDebugConfig(): DebugConfig {
     mode: process.env.MEMORY_DEBUG_MODE === 'true',
     operations: process.env.MEMORY_DEBUG_OPERATIONS === 'true',
     validation: process.env.MEMORY_DEBUG_VALIDATION === 'true',
-    accessTracking: process.env.MEMORY_DEBUG_ACCESS_TRACKING === 'true'
+    accessTracking: process.env.MEMORY_DEBUG_ACCESS_TRACKING === 'true',
   };
 }
 
@@ -952,6 +998,7 @@ When working on this codebase:
 5. **Document breaking changes** - especially schema or embedding model changes
 
 For more details, see:
+
 - `CLAUDE.md` - Project context and development guide
 - `prompts/README.md` - Prompt composition and versioning guide
 - `src/memory/types.ts` - Core domain types and interfaces

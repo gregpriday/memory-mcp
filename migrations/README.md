@@ -536,6 +536,7 @@ Using a cloud provider eliminates local installation complexity and provides man
 **Note**: Neon supports both direct endpoints (`*.neon.tech`) and pooling endpoints (`*.pooler.neon.tech`). Choose the appropriate URL based on your connection pooling needs. The pgvector extension must be created on each branch separately.
 
 **Benefits:**
+
 - Automatic scaling
 - Built-in connection pooling
 - Free tier available
@@ -572,6 +573,7 @@ Using a cloud provider eliminates local installation complexity and provides man
 **Note**: Supabase enforces SSL connections. Use `?sslmode=require` at minimum. For strict certificate verification, use `sslmode=verify-full` with appropriate `sslrootcert` configuration.
 
 **Benefits:**
+
 - Dashboard with SQL editor
 - Real-time capabilities (optional)
 - Generous free tier
@@ -593,6 +595,7 @@ Other PostgreSQL providers with pgvector support:
 ### pgvector Extension Missing
 
 **Error:**
+
 ```
 ERROR: extension "vector" is not available
 ```
@@ -610,6 +613,7 @@ ERROR: extension "vector" is not available
    psql "$DATABASE_URL" -c "SELECT version();"
    ```
 4. **Restart PostgreSQL** after installing pgvector:
+
    ```bash
    # macOS
    brew services restart postgresql@15
@@ -624,6 +628,7 @@ ERROR: extension "vector" is not available
 ### Permission Errors
 
 **Error:**
+
 ```
 ERROR: permission denied to create extension "vector"
 ```
@@ -643,6 +648,7 @@ sudo -u postgres psql -d memory_default -f migrations/20250117000001_init_postgr
 ### psql Command Not Found (Windows)
 
 **Error:**
+
 ```
 'psql' is not recognized as an internal or external command
 ```
@@ -650,6 +656,7 @@ sudo -u postgres psql -d memory_default -f migrations/20250117000001_init_postgr
 **Solutions:**
 
 1. **Add PostgreSQL to PATH:**
+
    ```powershell
    # Open PowerShell as Administrator
    $pgPath = "C:\Program Files\PostgreSQL\15\bin"
@@ -668,6 +675,7 @@ sudo -u postgres psql -d memory_default -f migrations/20250117000001_init_postgr
 ### Connection Refused
 
 **Error:**
+
 ```
 psql: error: connection to server at "localhost" (::1), port 5432 failed: Connection refused
 ```
@@ -675,6 +683,7 @@ psql: error: connection to server at "localhost" (::1), port 5432 failed: Connec
 **Solutions:**
 
 1. **Start PostgreSQL service:**
+
    ```bash
    # macOS
    brew services start postgresql@15
@@ -687,6 +696,7 @@ psql: error: connection to server at "localhost" (::1), port 5432 failed: Connec
    ```
 
 2. **Check if PostgreSQL is running:**
+
    ```bash
    # macOS/Linux
    pg_isready
@@ -706,6 +716,7 @@ psql: error: connection to server at "localhost" (::1), port 5432 failed: Connec
 ### Embedding Dimension Mismatch
 
 **Error:**
+
 ```
 ERROR: cannot insert embedding: dimension mismatch
 ```
@@ -715,18 +726,21 @@ ERROR: cannot insert embedding: dimension mismatch
 **Solutions:**
 
 1. **Use matching model** in `.env`:
+
    ```bash
    MEMORY_EMBEDDING_MODEL=text-embedding-3-small
    MEMORY_EMBEDDING_DIMENSIONS=1536
    ```
 
 2. **Or modify schema** if using different model (e.g., `text-embedding-3-large` = 3072 dimensions):
+
    ```sql
    -- In migration file, change line 59:
    embedding VECTOR(3072) NOT NULL,  -- For text-embedding-3-large
    ```
 
    Then update `.env`:
+
    ```bash
    MEMORY_EMBEDDING_MODEL=text-embedding-3-large
    MEMORY_EMBEDDING_DIMENSIONS=3072

@@ -100,6 +100,7 @@ Run the setup script to automatically create the database, enable pgvector, and 
 ```
 
 The script will:
+
 - Check if PostgreSQL is installed and running
 - Create the `memory_default` database
 - Enable the pgvector extension
@@ -206,6 +207,7 @@ psql -d memory_default -c "\dt"
 ```
 
 Expected output should show:
+
 - Database `memory_default` exists
 - PostgreSQL version 14+
 - pgvector extension in the extensions list
@@ -318,11 +320,13 @@ Supported models (configured via `MEMORY_EMBEDDING_MODEL`):
 The prompt system supports optional context injection:
 
 **Host Context** (`MEMORY_MCP_SYSTEM_MESSAGE`):
+
 - Tells the memory server what role it plays in the overall system
 - Guides what kinds of information should be stored or avoided
 - Can be inline text or a file path (e.g., `./config/memory-host-context.txt`)
 
 **Project Context** (`projectSystemMessagePath` in tool calls):
+
 - Per-request context for specific projects or use cases
 - Passed as a parameter to individual tool calls
 - Useful for biasing behavior on a per-operation basis
@@ -381,6 +385,7 @@ The Memory MCP server exposes tools through the Model Context Protocol. These to
 MCP tools are called through MCP-compatible clients like Claude Desktop. When you interact with Claude, you can reference memories naturally in conversation, and Claude will use these tools automatically. The tools can also be called programmatically through the MCP protocol using JSON payloads as shown in the examples below.
 
 **Example conversational usage in Claude Desktop:**
+
 - "Remember that I prefer dark mode" → uses `memorize` tool
 - "What are my notification preferences?" → uses `recall` tool
 - "Forget my old email address" → uses `forget` tool
@@ -390,6 +395,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 **Purpose**: Capture durable memories from free-form text or files. The agent extracts atomic facts, enriches them with metadata (topic, tags, memoryType), and stores them in PostgreSQL + pgvector.
 
 **Parameters**:
+
 - `input` (required): Natural language instruction describing what to memorize
 - `files` (optional): Array of relative file paths to ingest alongside the instruction
 - `index` (optional): Index name (defaults to `MEMORY_DEFAULT_INDEX`)
@@ -418,6 +424,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 ```
 
 **Behavior**:
+
 - Breaks down complex information into atomic, searchable memories
 - Automatically extracts topics, tags, and classifies memory types (self, belief, pattern, episodic, semantic)
 - For large files, uses chunking and GPT-4-mini for fast pre-processing via `analyze_text` tool
@@ -428,6 +435,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 **Purpose**: Search stored memories and optionally synthesize an answer. Supports metadata filters, returning raw memories, and priority-aware synthesis.
 
 **Parameters**:
+
 - `query` (required): Natural language question or topic to search for
 - `index` (optional): Index name override
 - `limit` (optional): Maximum number of memories to return (default: 10)
@@ -469,6 +477,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 ```
 
 **Behavior**:
+
 - Uses semantic search (pgvector) + keyword search for hybrid retrieval
 - Priority-aware synthesis privileges high-salience memories
 - Automatic access tracking updates memory priority and access counts
@@ -479,6 +488,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 **Purpose**: Plan deletions with the LLM agent. Supports dry runs, metadata-scoped deletes, and explicit ID deletion.
 
 **Parameters**:
+
 - `input` (required): Instruction describing what to forget
 - `index` (optional): Index override
 - `filters` (optional): Metadata filters for narrowing deletion candidates
@@ -519,6 +529,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 ```
 
 **Behavior**:
+
 - Conservative deletion with dry-run protection (default)
 - Agent searches for matching memories and explains what would be deleted
 - Validates against safety rules (e.g., can't delete system memories)
@@ -530,6 +541,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 **Purpose**: Curate stored memories through consolidation, deduplication, reprioritization, and cleanup. The agent analyzes memories and generates structured refinement plans.
 
 **Parameters**:
+
 - `index` (optional): Index override
 - `operation` (optional): Refinement mode - `"consolidation"`, `"decay"`, `"cleanup"`, or `"reflection"`
 - `scope` (optional): Controls which memories are considered
@@ -593,6 +605,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 - `DELETE`: Remove obsolete or low-priority memories (recommendations only in dry-run)
 
 **Behavior**:
+
 - Agent uses GPT-4/5 for complex pattern analysis and planning
 - Generates structured refinement actions with rationale
 - Validates actions against safety rules (e.g., can't delete system memories)
@@ -604,6 +617,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 **Purpose**: Create or ensure a PostgreSQL-backed memory index exists for the active project.
 
 **Parameters**:
+
 - `name` (required): New index name
 - `description` (optional): Human description stored alongside the index record
 
@@ -617,6 +631,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 ```
 
 **Behavior**:
+
 - Creates a new index if it doesn't exist
 - If index already exists, returns existing index information
 - Indexes are stored as rows in the `memory_indexes` table
@@ -658,6 +673,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 ```
 
 **Behavior**:
+
 - Returns all indexes for the active project
 - Includes document counts for each index (pendingDocumentCount always 0 in PostgreSQL backend)
 - Provides aggregate statistics (totalMemories, totalDiskBytes)
@@ -669,6 +685,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 **Purpose**: Run direct PostgreSQL searches without LLM orchestration. Returns raw results and diagnostics for debugging and inspection.
 
 **Parameters**:
+
 - `query` (required): Search query text
 - `index` (optional): Index override
 - `limit` (optional): Max results (default 10, max 1000)
@@ -690,6 +707,7 @@ MCP tools are called through MCP-compatible clients like Claude Desktop. When yo
 ```
 
 **Behavior**:
+
 - Bypasses LLM agent and queries PostgreSQL directly
 - Useful for debugging search quality and inspecting raw embeddings
 - Returns raw search results with similarity scores
@@ -922,6 +940,7 @@ npm run build
 ### Other PostgreSQL Providers
 
 Any PostgreSQL 14+ provider with pgvector support will work:
+
 - AWS RDS for PostgreSQL (with pgvector extension)
 - Google Cloud SQL for PostgreSQL
 - Azure Database for PostgreSQL
