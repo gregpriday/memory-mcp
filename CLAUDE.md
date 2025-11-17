@@ -109,9 +109,6 @@ Debug categories in `src/config/debug.ts`:
 
 ## Important Files to Reference
 
-- **PROJECT_SPEC.md** - Complete rebuild specification with file-by-file guidance
-- **CURRENT_STATE.md** - What's implemented vs remaining work
-- **TASKS.md** - Task breakdown by layer
 - **prompts/README.md** - Prompt composition and versioning guide
 - **src/memory/types.ts** - Core domain types (MemoryRecord, SearchResult, metadata schemas)
 - **src/memory/IMemoryRepository.ts** - Repository contract (the only interface to storage)
