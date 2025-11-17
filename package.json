@@ -14,6 +14,7 @@
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "test:coverage": "jest --runInBand --coverage",
+    "test:indexes": "tsx --test tests/indexTools.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{ts,js,json}\"",
