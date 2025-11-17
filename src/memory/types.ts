@@ -20,8 +20,8 @@
 export type MemoryType = 'self' | 'belief' | 'pattern' | 'episodic' | 'semantic';
 
 export interface MemoryContent {
-  text: string;          // The atomic fact / snippet
-  timestamp: string;     // ISO timestamp when stored
+  text: string; // The atomic fact / snippet
+  timestamp: string; // ISO timestamp when stored
 }
 
 /**
@@ -29,15 +29,15 @@ export interface MemoryContent {
  * These types enable spreading activation retrieval and relationship-based consolidation.
  */
 export type RelationshipType =
-  | 'summarizes'           // A summarizes B (pattern/summary → episodic memories) - A is a concise version of B
-  | 'example_of'           // A is example of B (episodic → pattern/category) - A is a concrete instance of the pattern B
+  | 'summarizes' // A summarizes B (pattern/summary → episodic memories) - A is a concise version of B
+  | 'example_of' // A is example of B (episodic → pattern/category) - A is a concrete instance of the pattern B
   | 'is_generalization_of' // A generalizes B (pattern/belief → episodic memories) - A is a general principle derived from B
-  | 'supports'             // A supports B (episodic/pattern → belief) - Evidence or reasoning that reinforces B
-  | 'contradicts'          // A contradicts B (episodic → episodic or belief → belief) - Direct opposition or conflicting information
-  | 'causes'               // A causes B (episodic → episodic) - Causal relationship where A leads to B
-  | 'similar_to'           // A is similar to B (episodic → episodic) - Semantic or contextual similarity without direct relationship
+  | 'supports' // A supports B (episodic/pattern → belief) - Evidence or reasoning that reinforces B
+  | 'contradicts' // A contradicts B (episodic → episodic or belief → belief) - Direct opposition or conflicting information
+  | 'causes' // A causes B (episodic → episodic) - Causal relationship where A leads to B
+  | 'similar_to' // A is similar to B (episodic → episodic) - Semantic or contextual similarity without direct relationship
   | 'historical_version_of' // A is older version of B (episodic → episodic) - A was superseded or updated to become B
-  | 'derived_from';        // A was derived from B (pattern/belief → episodics/patterns) - A is computed or abstracted from B
+  | 'derived_from'; // A was derived from B (pattern/belief → episodics/patterns) - A is computed or abstracted from B
 
 /**
  * Represents a directed edge in the memory graph.
@@ -123,15 +123,15 @@ export interface MemoryDynamics {
 }
 
 export interface MemoryMetadata {
-  index: string;         // Logical index name (duplicated for filtering)
-  project?: string;      // Arbitrary project identifier
+  index: string; // Logical index name (duplicated for filtering)
+  project?: string; // Arbitrary project identifier
   source?: 'user' | 'file' | 'system';
-  sourcePath?: string;   // Relative file path, e.g. scripts/ep01.md
-  channel?: string;      // e.g. YouTube channel name
+  sourcePath?: string; // Relative file path, e.g. scripts/ep01.md
+  channel?: string; // e.g. YouTube channel name
   scriptTitle?: string;
-  tags?: string[];       // e.g. ["pricing", "onboarding"]
-  topic?: string;        // main topic / theme
-  date?: string;         // logical date for the content (YYYY-MM-DD)
+  tags?: string[]; // e.g. ["pricing", "onboarding"]
+  topic?: string; // main topic / theme
+  date?: string; // logical date for the content (YYYY-MM-DD)
   importance?: Importance;
   emotion?: EmotionInfo; // Optional emotional context for priority weighting
 
@@ -143,7 +143,7 @@ export interface MemoryMetadata {
   memoryType?: MemoryType;
 
   // Graph-related fields
-  relatedIds?: string[];     // convenience flattened list
+  relatedIds?: string[]; // convenience flattened list
   relationships?: Relationship[]; // typed edges with semantic meaning
 
   // Lifecycle dynamics (optional for backward compatibility)
@@ -305,11 +305,11 @@ export interface ScanMemoriesResult {
 
 // Agent-level types for internal operations
 export interface MemoryToUpsert {
-  id?: string;                           // Optional ID for updates (vs. new inserts)
+  id?: string; // Optional ID for updates (vs. new inserts)
   text: string;
   metadata?: Partial<MemoryMetadata>;
-  timestamp?: string;                    // Preserve creation time on updates
-  memoryType?: MemoryType;               // Optional top-level memoryType (normalized into metadata)
+  timestamp?: string; // Preserve creation time on updates
+  memoryType?: MemoryType; // Optional top-level memoryType (normalized into metadata)
 }
 
 export interface SearchResult {
@@ -387,17 +387,17 @@ export interface InternalTool {
 
 /** Type of refinement operation to perform */
 export type RefinementOperation =
-  | 'consolidation'  // Merge related memories into summaries
-  | 'decay'          // Reduce priority of old/unused memories
-  | 'cleanup'        // Remove redundant or superseded memories
-  | 'reflection';    // Synthesize beliefs from pattern clusters
+  | 'consolidation' // Merge related memories into summaries
+  | 'decay' // Reduce priority of old/unused memories
+  | 'cleanup' // Remove redundant or superseded memories
+  | 'reflection'; // Synthesize beliefs from pattern clusters
 
 /** Action types for the refinement execution plan */
 export type RefinementActionType =
-  | 'UPDATE'   // Modify existing memory metadata or text
-  | 'DELETE'   // Remove memories
-  | 'MERGE'    // Consolidate multiple memories into one
-  | 'CREATE';  // Generate new derived/summary memories
+  | 'UPDATE' // Modify existing memory metadata or text
+  | 'DELETE' // Remove memories
+  | 'MERGE' // Consolidate multiple memories into one
+  | 'CREATE'; // Generate new derived/summary memories
 
 /**
  * Update action: modify existing memory metadata or text.

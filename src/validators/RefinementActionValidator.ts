@@ -32,10 +32,7 @@ export interface ValidationContext {
  * Base interface for action validators
  */
 export interface ActionValidator {
-  validate(
-    action: RefinementAction,
-    context: ValidationContext
-  ): Promise<ValidationResult>;
+  validate(action: RefinementAction, context: ValidationContext): Promise<ValidationResult>;
 }
 
 /**
@@ -57,10 +54,7 @@ function isSystemMemoryByMetadata(metadata?: MemoryMetadata): boolean {
  * Validator for UPDATE actions
  */
 export class UpdateActionValidator implements ActionValidator {
-  async validate(
-    action: RefinementAction,
-    context: ValidationContext
-  ): Promise<ValidationResult> {
+  async validate(action: RefinementAction, context: ValidationContext): Promise<ValidationResult> {
     const errors: string[] = [];
 
     if (action.type !== 'UPDATE') {
@@ -82,9 +76,7 @@ export class UpdateActionValidator implements ActionValidator {
     // Check for system memory protection
     if (updateAction.id) {
       if (isSystemMemory(updateAction.id)) {
-        errors.push(
-          `Cannot UPDATE system memory ${updateAction.id} (protected)`
-        );
+        errors.push(`Cannot UPDATE system memory ${updateAction.id} (protected)`);
       }
     }
 
@@ -95,10 +87,7 @@ export class UpdateActionValidator implements ActionValidator {
         index: context.indexName,
       });
 
-      const memory = await context.repository.getMemory(
-        context.indexName,
-        updateAction.id
-      );
+      const memory = await context.repository.getMemory(context.indexName, updateAction.id);
 
       debugLog('validation', 'UPDATE: Fetch result', {
         id: updateAction.id,
@@ -107,21 +96,17 @@ export class UpdateActionValidator implements ActionValidator {
       });
 
       if (!memory) {
-        errors.push(
-          `Memory ${updateAction.id} not found in index ${context.indexName}`
-        );
+        errors.push(`Memory ${updateAction.id} not found in index ${context.indexName}`);
       } else if (isSystemMemoryByMetadata(memory.metadata)) {
-        errors.push(
-          `Cannot UPDATE system memory ${updateAction.id} (marked as system)`
-        );
+        errors.push(`Cannot UPDATE system memory ${updateAction.id} (marked as system)`);
       }
     }
 
     // Validate metadata updates if present
     if (updateAction.metadataUpdates) {
       const forbidden = ['id', 'index'];
-      const forbiddenFields = Object.keys(updateAction.metadataUpdates).filter(
-        (key) => forbidden.includes(key)
+      const forbiddenFields = Object.keys(updateAction.metadataUpdates).filter((key) =>
+        forbidden.includes(key)
       );
       if (forbiddenFields.length > 0) {
         errors.push(
@@ -149,10 +134,7 @@ export class UpdateActionValidator implements ActionValidator {
  * Validator for MERGE actions
  */
 export class MergeActionValidator implements ActionValidator {
-  async validate(
-    action: RefinementAction,
-    context: ValidationContext
-  ): Promise<ValidationResult> {
+  async validate(action: RefinementAction, context: ValidationContext): Promise<ValidationResult> {
     const errors: string[] = [];
 
     if (action.type !== 'MERGE') {
@@ -173,13 +155,8 @@ export class MergeActionValidator implements ActionValidator {
     }
 
     // Check for self-merge
-    if (
-      mergeAction.targetId &&
-      mergeAction.mergeSourceIds.includes(mergeAction.targetId)
-    ) {
-      errors.push(
-        `MERGE action cannot include targetId ${mergeAction.targetId} in mergeSourceIds`
-      );
+    if (mergeAction.targetId && mergeAction.mergeSourceIds.includes(mergeAction.targetId)) {
+      errors.push(`MERGE action cannot include targetId ${mergeAction.targetId} in mergeSourceIds`);
     }
 
     // Check for duplicate source IDs
@@ -196,9 +173,7 @@ export class MergeActionValidator implements ActionValidator {
     // Check for system memory protection on target
     if (mergeAction.targetId) {
       if (isSystemMemory(mergeAction.targetId)) {
-        errors.push(
-          `Cannot use system memory ${mergeAction.targetId} as MERGE target (protected)`
-        );
+        errors.push(`Cannot use system memory ${mergeAction.targetId} as MERGE target (protected)`);
       }
     }
 
@@ -206,16 +181,17 @@ export class MergeActionValidator implements ActionValidator {
     if (mergeAction.targetId && mergeAction.mergeSourceIds.length > 0 && errors.length === 0) {
       const allIds = [mergeAction.targetId, ...mergeAction.mergeSourceIds];
 
-      debugLog('validation', `MERGE: Fetching ${allIds.length} memories from index ${context.indexName}`, {
-        targetId: mergeAction.targetId,
-        sourceCount: mergeAction.mergeSourceIds.length,
-        sourceIds: mergeAction.mergeSourceIds,
-      });
-
-      const memories = await context.repository.getMemories(
-        context.indexName,
-        allIds
+      debugLog(
+        'validation',
+        `MERGE: Fetching ${allIds.length} memories from index ${context.indexName}`,
+        {
+          targetId: mergeAction.targetId,
+          sourceCount: mergeAction.mergeSourceIds.length,
+          sourceIds: mergeAction.mergeSourceIds,
+        }
       );
+
+      const memories = await context.repository.getMemories(context.indexName, allIds);
 
       debugLog('validation', 'MERGE: Fetch result', {
         requested: allIds.length,
@@ -235,18 +211,14 @@ export class MergeActionValidator implements ActionValidator {
       // Check for system memories in source IDs
       const systemSourceIds = mergeAction.mergeSourceIds.filter((id) => isSystemMemory(id));
       if (systemSourceIds.length > 0) {
-        errors.push(
-          `Cannot MERGE system memories ${systemSourceIds.join(', ')} (protected)`
-        );
+        errors.push(`Cannot MERGE system memories ${systemSourceIds.join(', ')} (protected)`);
       }
 
       // Also check metadata source field
       const systemByMetadata = memories.filter((m) => isSystemMemoryByMetadata(m.metadata));
       if (systemByMetadata.length > 0) {
         const systemIds = systemByMetadata.map((m) => m.id);
-        errors.push(
-          `Cannot MERGE system memories ${systemIds.join(', ')} (marked as system)`
-        );
+        errors.push(`Cannot MERGE system memories ${systemIds.join(', ')} (marked as system)`);
       }
     }
 
@@ -261,10 +233,7 @@ export class MergeActionValidator implements ActionValidator {
  * Validator for CREATE actions
  */
 export class CreateActionValidator implements ActionValidator {
-  async validate(
-    action: RefinementAction,
-    context: ValidationContext
-  ): Promise<ValidationResult> {
+  async validate(action: RefinementAction, context: ValidationContext): Promise<ValidationResult> {
     const errors: string[] = [];
 
     if (action.type !== 'CREATE') {
@@ -287,14 +256,15 @@ export class CreateActionValidator implements ActionValidator {
     // Validate derivedFromIds if present in metadata
     const derivedFromIds = createAction.newMemory.metadata?.derivedFromIds;
     if (derivedFromIds && Array.isArray(derivedFromIds) && derivedFromIds.length > 0) {
-      debugLog('validation', `CREATE: Fetching ${derivedFromIds.length} derivedFrom memories from index ${context.indexName}`, {
-        derivedFromIds,
-      });
-
-      const memories = await context.repository.getMemories(
-        context.indexName,
-        derivedFromIds
+      debugLog(
+        'validation',
+        `CREATE: Fetching ${derivedFromIds.length} derivedFrom memories from index ${context.indexName}`,
+        {
+          derivedFromIds,
+        }
       );
+
+      const memories = await context.repository.getMemories(context.indexName, derivedFromIds);
 
       debugLog('validation', 'CREATE: Fetch result', {
         requested: derivedFromIds.length,
@@ -303,9 +273,7 @@ export class CreateActionValidator implements ActionValidator {
       });
 
       const foundIds = new Set(memories.map((m) => m.id));
-      const missingIds = derivedFromIds.filter(
-        (id: string) => !foundIds.has(id)
-      );
+      const missingIds = derivedFromIds.filter((id: string) => !foundIds.has(id));
 
       if (missingIds.length > 0) {
         errors.push(
@@ -325,10 +293,7 @@ export class CreateActionValidator implements ActionValidator {
  * Validator for DELETE actions
  */
 export class DeleteActionValidator implements ActionValidator {
-  async validate(
-    action: RefinementAction,
-    context: ValidationContext
-  ): Promise<ValidationResult> {
+  async validate(action: RefinementAction, context: ValidationContext): Promise<ValidationResult> {
     const errors: string[] = [];
 
     if (action.type !== 'DELETE') {
@@ -340,9 +305,7 @@ export class DeleteActionValidator implements ActionValidator {
 
     // Check if deletion is allowed by config
     if (!context.config.allowDelete) {
-      errors.push(
-        'DELETE action not allowed: allowDelete is false in configuration'
-      );
+      errors.push('DELETE action not allowed: allowDelete is false in configuration');
       return { valid: false, errors };
     }
 
@@ -353,9 +316,13 @@ export class DeleteActionValidator implements ActionValidator {
     }
 
     // Verify IDs exist and check for system memories
-    debugLog('validation', `DELETE: Fetching ${deleteAction.deleteIds.length} memories from index ${context.indexName}`, {
-      deleteIds: deleteAction.deleteIds,
-    });
+    debugLog(
+      'validation',
+      `DELETE: Fetching ${deleteAction.deleteIds.length} memories from index ${context.indexName}`,
+      {
+        deleteIds: deleteAction.deleteIds,
+      }
+    );
 
     const memories = await context.repository.getMemories(
       context.indexName,
@@ -379,15 +346,12 @@ export class DeleteActionValidator implements ActionValidator {
 
     // Check for system memories
     const systemMemories = memories.filter(
-      (m) =>
-        m.id.startsWith('sys_') || m.metadata?.source === 'system'
+      (m) => m.id.startsWith('sys_') || m.metadata?.source === 'system'
     );
 
     if (systemMemories.length > 0) {
       const systemIds = systemMemories.map((m) => m.id);
-      errors.push(
-        `DELETE action cannot delete system memories: ${systemIds.join(', ')}`
-      );
+      errors.push(`DELETE action cannot delete system memories: ${systemIds.join(', ')}`);
     }
 
     return {
@@ -400,9 +364,7 @@ export class DeleteActionValidator implements ActionValidator {
 /**
  * Create the appropriate validator for an action type
  */
-export function createActionValidator(
-  actionType: RefinementAction['type']
-): ActionValidator {
+export function createActionValidator(actionType: RefinementAction['type']): ActionValidator {
   switch (actionType) {
     case 'UPDATE':
       return new UpdateActionValidator();

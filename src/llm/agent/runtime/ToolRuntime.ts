@@ -75,7 +75,8 @@ export class ToolRuntime {
       },
       {
         name: 'get_memories',
-        description: 'Fetch memories by their IDs to follow explicit relationships or inspect neighbors in the graph',
+        description:
+          'Fetch memories by their IDs to follow explicit relationships or inspect neighbors in the graph',
         parameters: {
           type: 'object',
           properties: {
@@ -138,7 +139,8 @@ export class ToolRuntime {
       },
       {
         name: 'analyze_text',
-        description: 'Analyze text to extract key facts, metadata, topics, and tags using memory analysis expertise',
+        description:
+          'Analyze text to extract key facts, metadata, topics, and tags using memory analysis expertise',
         parameters: {
           type: 'object',
           properties: {
@@ -159,7 +161,7 @@ export class ToolRuntime {
     // In refinement-planning or forget-dryrun mode, only expose read-only tools
     if (operationMode === 'refinement-planning' || operationMode === 'forget-dryrun') {
       // Filter to only include: search_memories, get_memories, read_file, analyze_text
-      return tools.filter(tool =>
+      return tools.filter((tool) =>
         ['search_memories', 'get_memories', 'read_file', 'analyze_text'].includes(tool.name)
       );
     }
@@ -238,7 +240,7 @@ export class ToolRuntime {
           if (context.searchIterationCount >= this.maxSearchIterations) {
             return JSON.stringify({
               error: 'max_search_iterations_reached',
-              details: `Maximum ${this.maxSearchIterations} search iterations exceeded. Provide final answer with current results.`
+              details: `Maximum ${this.maxSearchIterations} search iterations exceeded. Provide final answer with current results.`,
             });
           }
 
@@ -274,7 +276,11 @@ export class ToolRuntime {
               // - Dry-run mode: treat as meeting minimum threshold to avoid filtering preview candidates
               // - Execution mode: treat as 0 to filter them out (require valid confidence for deletion)
               const hasScore = typeof result.score === 'number' && Number.isFinite(result.score);
-              const score = hasScore ? (result.score as number) : (forgetContext.dryRun ? minScore : 0);
+              const score = hasScore
+                ? (result.score as number)
+                : forgetContext.dryRun
+                  ? minScore
+                  : 0;
               return score >= minScore;
             });
           }
@@ -323,7 +329,10 @@ export class ToolRuntime {
 
           // Validate memories array
           if (!Array.isArray(memories)) {
-            return JSON.stringify({ error: 'invalid_memories', details: 'memories must be an array' });
+            return JSON.stringify({
+              error: 'invalid_memories',
+              details: 'memories must be an array',
+            });
           }
 
           // Cap at 50 memories per call
@@ -332,15 +341,17 @@ export class ToolRuntime {
           // Validate each memory has text
           for (const memory of cappedMemories) {
             if (!memory.text || typeof memory.text !== 'string' || memory.text.trim() === '') {
-              return JSON.stringify({ error: 'invalid_memories', details: 'each memory must have non-empty text' });
+              return JSON.stringify({
+                error: 'invalid_memories',
+                details: 'each memory must have non-empty text',
+              });
             }
           }
 
           // Normalize memoryType: move from top-level to metadata if present
           const normalizedMemories = cappedMemories.map((memory) => {
             // Sanitize null metadata to prevent downstream crashes
-            const sanitizedMemory =
-              memory.metadata === null ? { ...memory, metadata: {} } : memory;
+            const sanitizedMemory = memory.metadata === null ? { ...memory, metadata: {} } : memory;
 
             // If memoryType exists at top level, validate and move to metadata
             if (sanitizedMemory.memoryType && typeof sanitizedMemory.memoryType === 'string') {
@@ -363,7 +374,11 @@ export class ToolRuntime {
           });
 
           // SECURITY: Use context index, ignore LLM-provided index
-          const ids = await this.repo.upsertMemories(context.index, normalizedMemories, defaultMetadata);
+          const ids = await this.repo.upsertMemories(
+            context.index,
+            normalizedMemories,
+            defaultMetadata
+          );
           // Accumulate IDs for use in final result
           context.storedMemoryIds.push(...ids);
           return JSON.stringify({ success: true, ids }, null, 2);
@@ -371,7 +386,10 @@ export class ToolRuntime {
 
         case 'delete_memories': {
           // SECURITY: Prevent deletions in read-only/dry-run modes
-          if (context.operationMode === 'refinement-planning' || context.operationMode === 'forget-dryrun') {
+          if (
+            context.operationMode === 'refinement-planning' ||
+            context.operationMode === 'forget-dryrun'
+          ) {
             return JSON.stringify({
               error: `delete_memories not allowed in ${context.operationMode} mode`,
             });
@@ -384,11 +402,14 @@ export class ToolRuntime {
 
           // Validate IDs array
           if (!Array.isArray(ids) || ids.length === 0) {
-            return JSON.stringify({ error: 'invalid_ids', details: 'ids must be a non-empty array' });
+            return JSON.stringify({
+              error: 'invalid_ids',
+              details: 'ids must be a non-empty array',
+            });
           }
 
           // SECURITY: Filter out system IDs (never delete sys_* IDs)
-          const safeIds = ids.filter(id => !id.startsWith('sys_'));
+          const safeIds = ids.filter((id) => !id.startsWith('sys_'));
           if (safeIds.length === 0) {
             return JSON.stringify({ success: true, deletedCount: 0, skippedSystemIds: ids.length });
           }
@@ -396,11 +417,15 @@ export class ToolRuntime {
           // Note: This tool is only available when NOT in dry-run mode
           // SECURITY: Use context index, ignore LLM-provided index
           const actualDeletedCount = await this.repo.deleteMemories(context.index, safeIds);
-          return JSON.stringify({
-            success: true,
-            deletedCount: actualDeletedCount,
-            skippedSystemIds: ids.length - safeIds.length
-          }, null, 2);
+          return JSON.stringify(
+            {
+              success: true,
+              deletedCount: actualDeletedCount,
+              skippedSystemIds: ids.length - safeIds.length,
+            },
+            null,
+            2
+          );
         }
 
         case 'read_file': {
@@ -417,7 +442,10 @@ export class ToolRuntime {
 
           // Use memory-analyzer and classification prompts with LLM
           // Note: We use composePrompt here to get host context injection
-          const systemPrompt = this.prompts.composePrompt(['memory-analyzer', 'memory-memorize-classify']);
+          const systemPrompt = this.prompts.composePrompt([
+            'memory-analyzer',
+            'memory-memorize-classify',
+          ]);
 
           const userPrompt = `Analyze the following text and extract key information:\n\n${text}\n\nContext: ${JSON.stringify(contextMetadata || {})}`;
 
@@ -469,22 +497,22 @@ export class ToolRuntime {
         const preview = (response.content || '').substring(0, 200);
         throw new Error(
           `LLM response was truncated due to token limit (16384 tokens exceeded). ` +
-          `Try breaking input into smaller chunks or contact support. ` +
-          `Response preview: ${preview}...`
+            `Try breaking input into smaller chunks or contact support. ` +
+            `Response preview: ${preview}...`
         );
       }
 
       if (response.finishReason === 'content_filter') {
         throw new Error(
           `LLM response was filtered due to content policy violation. ` +
-          `Please review input for policy violations and try again.`
+            `Please review input for policy violations and try again.`
         );
       }
 
       if (!response.finishReason) {
         throw new Error(
           `LLM response missing finish reason. This may indicate an API error. ` +
-          `Response content: ${(response.content || '').substring(0, 200)}...`
+            `Response content: ${(response.content || '').substring(0, 200)}...`
         );
       }
 
@@ -542,9 +570,10 @@ export class ToolRuntime {
               } else if (parsedResult && typeof parsedResult === 'object' && parsedResult.error) {
                 logEntry.diagnostics = {
                   ...(logEntry.diagnostics || {}),
-                  errorMessage: typeof parsedResult.error === 'string'
-                    ? parsedResult.error
-                    : JSON.stringify(parsedResult.error),
+                  errorMessage:
+                    typeof parsedResult.error === 'string'
+                      ? parsedResult.error
+                      : JSON.stringify(parsedResult.error),
                 };
               }
             } catch {
@@ -563,9 +592,10 @@ export class ToolRuntime {
               } else if (parsedResult && typeof parsedResult === 'object' && parsedResult.error) {
                 logEntry.diagnostics = {
                   ...(logEntry.diagnostics || {}),
-                  errorMessage: typeof parsedResult.error === 'string'
-                    ? parsedResult.error
-                    : JSON.stringify(parsedResult.error),
+                  errorMessage:
+                    typeof parsedResult.error === 'string'
+                      ? parsedResult.error
+                      : JSON.stringify(parsedResult.error),
                 };
               }
             } catch {

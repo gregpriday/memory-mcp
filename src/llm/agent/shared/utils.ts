@@ -20,7 +20,7 @@ export function convertFiltersToExpression(
       expressions.push(`${fieldName} = ${value}`);
     } else if (Array.isArray(value)) {
       // For arrays, use CONTAINS for each element (joined with OR within the array, AND with other filters)
-      const arrayExpressions = (value as (string | number | boolean)[]).map(item => {
+      const arrayExpressions = (value as (string | number | boolean)[]).map((item) => {
         if (typeof item === 'string') {
           return `${fieldName} CONTAINS "${item}"`;
         } else if (typeof item === 'number') {
@@ -72,9 +72,9 @@ export function safeJsonParse<T>(payload: string, context: string): T {
     const preview = payload.substring(0, 200);
     throw new Error(
       `Failed to parse ${context} as JSON. ` +
-      `This may indicate an incomplete or truncated response. ` +
-      `Error: ${(parseError as Error).message}. ` +
-      `Response preview: ${preview}...`
+        `This may indicate an incomplete or truncated response. ` +
+        `Error: ${(parseError as Error).message}. ` +
+        `Response preview: ${preview}...`
     );
   }
 }

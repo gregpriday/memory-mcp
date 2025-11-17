@@ -25,7 +25,10 @@ function isRetryable(error: unknown): boolean {
   return RETRYABLE_SNIPPETS.some((snippet) => message.includes(snippet));
 }
 
-export async function executeWithRetry<T>(fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
+export async function executeWithRetry<T>(
+  fn: () => Promise<T>,
+  options: RetryOptions = {}
+): Promise<T> {
   const maxRetries = options.maxRetries ?? 3;
   const initialDelayMs = options.initialDelayMs ?? 100;
   const maxDelayMs = options.maxDelayMs ?? 5000;

@@ -45,7 +45,9 @@ export function createMemoryServer(config?: {
   const projectRoot = config?.projectRoot || process.cwd();
 
   if (!databaseUrl) {
-    throw new Error('No Postgres database URL configured. Update MEMORY_POSTGRES_PROJECT_REGISTRY.');
+    throw new Error(
+      'No Postgres database URL configured. Update MEMORY_POSTGRES_PROJECT_REGISTRY.'
+    );
   }
 
   if (!openaiApiKey) {
@@ -107,8 +109,7 @@ export function createMemoryServer(config?: {
             properties: {
               input: {
                 type: 'string',
-                description:
-                  'Natural language instruction describing what to memorize.',
+                description: 'Natural language instruction describing what to memorize.',
               },
               files: {
                 type: 'array',
@@ -118,8 +119,7 @@ export function createMemoryServer(config?: {
               },
               index: {
                 type: 'string',
-                description:
-                  'Optional index name. Defaults to MEMORY_DEFAULT_INDEX.',
+                description: 'Optional index name. Defaults to MEMORY_DEFAULT_INDEX.',
               },
               projectSystemMessagePath: {
                 type: 'string',
@@ -160,8 +160,7 @@ export function createMemoryServer(config?: {
               },
               filterExpression: {
                 type: 'string',
-                description:
-                  'Advanced filter expression understood by the Postgres filter parser.',
+                description: 'Advanced filter expression understood by the Postgres filter parser.',
               },
               projectSystemMessagePath: {
                 type: 'string',
@@ -170,7 +169,8 @@ export function createMemoryServer(config?: {
               responseMode: {
                 type: 'string',
                 enum: ['answer', 'memories', 'both'],
-                description: 'Controls whether the agent returns synthesized answers, raw memories, or both.',
+                description:
+                  'Controls whether the agent returns synthesized answers, raw memories, or both.',
               },
             },
             required: ['query'],
@@ -280,8 +280,7 @@ export function createMemoryServer(config?: {
         },
         {
           name: 'scan_memories',
-          description:
-            'Run direct Postgres searches (no LLM) and inspect raw results/diagnostics.',
+          description: 'Run direct Postgres searches (no LLM) and inspect raw results/diagnostics.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -341,7 +340,7 @@ export function createMemoryServer(config?: {
           throw new Error(`Unknown tool: ${name}`);
       }
     } catch (error) {
-      console.error(`Error handling tool \"${name}\":`, error);
+      console.error(`Error handling tool "${name}":`, error);
       return {
         content: [
           {

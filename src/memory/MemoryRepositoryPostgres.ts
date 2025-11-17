@@ -660,20 +660,22 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       }>(searchQuery, params);
 
       // Convert to SearchResult format
-      const memoryRecords: MemoryRecord[] = result.rows.map((row: {
-        id: string;
-        content: string;
-        metadata: any;
-        created_at: Date;
-        semantic_score: number;
-      }) => ({
-        id: row.id,
-        content: {
-          text: row.content,
-          timestamp: row.created_at.toISOString(),
-        },
-        metadata: row.metadata as MemoryMetadata,
-      }));
+      const memoryRecords: MemoryRecord[] = result.rows.map(
+        (row: {
+          id: string;
+          content: string;
+          metadata: any;
+          created_at: Date;
+          semantic_score: number;
+        }) => ({
+          id: row.id,
+          content: {
+            text: row.content,
+            timestamp: row.created_at.toISOString(),
+          },
+          metadata: row.metadata as MemoryMetadata,
+        })
+      );
 
       // Populate relationships from memory_relationships table
       if (includeMetadata) {
@@ -864,19 +866,16 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       [indexId, this.projectId, ids]
     );
 
-    const memories = result.rows.map((row: {
-      id: string;
-      content: string;
-      created_at: Date;
-      metadata: any;
-    }) => ({
-      id: row.id,
-      content: {
-        text: row.content,
-        timestamp: row.created_at.toISOString(),
-      },
-      metadata: row.metadata as MemoryMetadata,
-    }));
+    const memories = result.rows.map(
+      (row: { id: string; content: string; created_at: Date; metadata: any }) => ({
+        id: row.id,
+        content: {
+          text: row.content,
+          timestamp: row.created_at.toISOString(),
+        },
+        metadata: row.metadata as MemoryMetadata,
+      })
+    );
 
     // Populate relationships from memory_relationships table
     await this.populateRelationships(memories);

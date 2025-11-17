@@ -42,9 +42,7 @@ export class MemoryController {
   /**
    * Load project system message if provided
    */
-  private async loadProjectSystemMessage(
-    path?: string
-  ): Promise<string | undefined> {
+  private async loadProjectSystemMessage(path?: string): Promise<string | undefined> {
     if (!path) {
       return undefined;
     }
@@ -84,15 +82,9 @@ export class MemoryController {
   async handleMemorizeTool(args: MemorizeToolArgs): Promise<any> {
     try {
       const index = this.indexResolver.resolve(args.index);
-      const projectMessage = await this.loadProjectSystemMessage(
-        args.projectSystemMessagePath
-      );
+      const projectMessage = await this.loadProjectSystemMessage(args.projectSystemMessagePath);
 
-      const result: MemorizeResult = await this.agent.memorize(
-        args,
-        index,
-        projectMessage
-      );
+      const result: MemorizeResult = await this.agent.memorize(args, index, projectMessage);
 
       if (result.status === 'error') {
         return this.formatResponse(result, `Error: ${result.error}`, true);
@@ -106,10 +98,13 @@ export class MemoryController {
 
         // Add action-specific emoji
         const actionEmoji =
-          action === 'STORED' ? '✅'
-            : action === 'DEDUPLICATED' ? '🔄'
-            : action === 'FILTERED' ? '🚫'
-            : '⚠️';
+          action === 'STORED'
+            ? '✅'
+            : action === 'DEDUPLICATED'
+              ? '🔄'
+              : action === 'FILTERED'
+                ? '🚫'
+                : '⚠️';
 
         const heading = `${actionEmoji} ${action}: ${reason}`;
 
@@ -129,9 +124,7 @@ export class MemoryController {
           // Split into paragraphs and filter out duplicates
           const uniqueSections = trimmedNotes
             .split(/\n{2,}/)
-            .filter(
-              (section) => !section.trim().toUpperCase().startsWith(`${action}:`)
-            )
+            .filter((section) => !section.trim().toUpperCase().startsWith(`${action}:`))
             .join('\n\n')
             .trim();
 
@@ -167,15 +160,9 @@ export class MemoryController {
   async handleRecallTool(args: RecallToolArgs): Promise<any> {
     try {
       const index = this.indexResolver.resolve(args.index);
-      const projectMessage = await this.loadProjectSystemMessage(
-        args.projectSystemMessagePath
-      );
+      const projectMessage = await this.loadProjectSystemMessage(args.projectSystemMessagePath);
 
-      const result: RecallResult = await this.agent.recall(
-        args,
-        index,
-        projectMessage
-      );
+      const result: RecallResult = await this.agent.recall(args, index, projectMessage);
 
       if (result.status === 'error') {
         let errorSummary = `Error: ${result.error}`;
@@ -201,9 +188,14 @@ export class MemoryController {
 
         // Add diagnostic guidance based on search status
         if (result.searchStatus === 'pending_documents') {
-          summary += '\n\nNote: The index has documents pending indexing. If you just stored new memories, wait 5-10 seconds for embeddings to finish indexing, then retry your query.';
-        } else if (result.searchStatus === 'no_results' && (!result.memories || result.memories.length === 0)) {
-          summary += '\n\nNote: Search completed successfully but found no matching memories in the index.';
+          summary +=
+            '\n\nNote: The index has documents pending indexing. If you just stored new memories, wait 5-10 seconds for embeddings to finish indexing, then retry your query.';
+        } else if (
+          result.searchStatus === 'no_results' &&
+          (!result.memories || result.memories.length === 0)
+        ) {
+          summary +=
+            '\n\nNote: Search completed successfully but found no matching memories in the index.';
         }
       } else if (mode === 'memories' && result.memories) {
         summary = `Found ${result.memories.length} memories`;
@@ -211,7 +203,8 @@ export class MemoryController {
         // Add diagnostic guidance for empty results
         if (result.memories.length === 0) {
           if (result.searchStatus === 'pending_documents') {
-            summary += '\n\nNote: The index has documents pending indexing. Wait a few seconds and retry.';
+            summary +=
+              '\n\nNote: The index has documents pending indexing. Wait a few seconds and retry.';
           } else if (result.searchStatus === 'no_results') {
             summary += '\n\nNote: Search completed successfully but found no matching memories.';
           }
@@ -249,15 +242,9 @@ export class MemoryController {
   async handleForgetTool(args: ForgetToolArgs): Promise<any> {
     try {
       const index = this.indexResolver.resolve(args.index);
-      const projectMessage = await this.loadProjectSystemMessage(
-        args.projectSystemMessagePath
-      );
+      const projectMessage = await this.loadProjectSystemMessage(args.projectSystemMessagePath);
 
-      const result: ForgetResult = await this.agent.forget(
-        args,
-        index,
-        projectMessage
-      );
+      const result: ForgetResult = await this.agent.forget(args, index, projectMessage);
 
       if (result.status === 'error') {
         return this.formatResponse(result, `Error: ${result.error}`, true);
@@ -267,9 +254,10 @@ export class MemoryController {
       if (args.dryRun !== false) {
         // Dry run mode
         const planCount = result.plan?.length || 0;
-        summary = planCount > 0
-          ? `Dry run: Would delete ${planCount} memories. Review the plan below.`
-          : 'Dry run: No memories matched the forget criteria.';
+        summary =
+          planCount > 0
+            ? `Dry run: Would delete ${planCount} memories. Review the plan below.`
+            : 'Dry run: No memories matched the forget criteria.';
       } else {
         // Execution mode
         summary = `Deleted ${result.deletedCount || 0} memories from index "${result.index}".`;
@@ -359,9 +347,7 @@ export class MemoryController {
   async handleRefineMemoriesTool(args: RefineMemoriesToolArgs): Promise<McpContent> {
     try {
       const index = this.indexResolver.resolve(args.index);
-      const projectMessage = await this.loadProjectSystemMessage(
-        args.projectSystemMessagePath
-      );
+      const projectMessage = await this.loadProjectSystemMessage(args.projectSystemMessagePath);
 
       const result: RefineMemoriesResult = await this.agent.refineMemories(
         args,
@@ -459,9 +445,11 @@ export class MemoryController {
 
       // Add diagnostic guidance based on search status
       if (result.searchStatus === 'pending_documents') {
-        summary += '\n\n⚠️ Note: The index has documents pending indexing. If you just stored new memories, wait 5-10 seconds for embeddings to finish indexing, then retry your query.';
+        summary +=
+          '\n\n⚠️ Note: The index has documents pending indexing. If you just stored new memories, wait 5-10 seconds for embeddings to finish indexing, then retry your query.';
       } else if (result.searchStatus === 'no_results' && resultCount === 0) {
-        summary += '\n\nℹ️ Note: Search completed successfully but found no matching memories in the index.';
+        summary +=
+          '\n\nℹ️ Note: Search completed successfully but found no matching memories in the index.';
       }
 
       // Add diagnostic summary if available

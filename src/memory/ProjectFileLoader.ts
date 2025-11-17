@@ -25,7 +25,8 @@ export class ProjectFileLoader {
     'config/credentials.yml',
   ]);
 
-  constructor(rootDir: string, maxFileSize: number = 2 * 1024 * 1024) { // 2MB default
+  constructor(rootDir: string, maxFileSize: number = 2 * 1024 * 1024) {
+    // 2MB default
     this.rootDir = resolve(rootDir);
     this.maxFileSize = maxFileSize;
   }

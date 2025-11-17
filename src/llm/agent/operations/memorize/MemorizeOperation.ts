@@ -9,11 +9,7 @@ import {
   MemoryToUpsert,
 } from '../../../../memory/types.js';
 import { ToolRuntime } from '../../runtime/ToolRuntime.js';
-import {
-  MemoryAgentConfig,
-  RequestContext,
-  PreprocessedFileSummary,
-} from '../../shared/index.js';
+import { MemoryAgentConfig, RequestContext, PreprocessedFileSummary } from '../../shared/index.js';
 import { safeJsonParse } from '../../shared/utils.js';
 import { debugLogOperation, debugLog } from '../../../../utils/logger.js';
 
@@ -45,11 +41,7 @@ export class MemorizeOperation {
    * Split large content into overlapping character chunks to keep LLM requests bounded
    */
   private chunkText(text: string): string[] {
-    const {
-      chunkSizeChars,
-      chunkOverlapChars,
-      maxChunksPerFile,
-    } = this.ingestionConfig;
+    const { chunkSizeChars, chunkOverlapChars, maxChunksPerFile } = this.ingestionConfig;
 
     if (chunkSizeChars <= 0) {
       return [text];
@@ -121,7 +113,10 @@ export class MemorizeOperation {
     chunk: string,
     contextMetadata: Record<string, unknown>
   ): Promise<MemoryToUpsert[]> {
-    const systemPrompt = this.prompts.composePrompt(['memory-analyzer', 'memory-memorize-classify']);
+    const systemPrompt = this.prompts.composePrompt([
+      'memory-analyzer',
+      'memory-memorize-classify',
+    ]);
     const userPrompt = [
       'Analyze the following text chunk and return JSON with a "memories" array.',
       'Each entry must include "text" and optional "metadata" (topic, tags, importance, relationships, etc.).',
@@ -276,24 +271,29 @@ export class MemorizeOperation {
         // If LLM claims STORED but nothing was stored, check if it was deduplication
         if (claimedAction === 'STORED' && storedCount === 0) {
           // Check operation log for signs of deduplication
-          const searchCalls = context.operationLog.filter(log => log.toolName === 'search_memories');
-          const upsertCalls = context.operationLog.filter(log => log.toolName === 'upsert_memories');
+          const searchCalls = context.operationLog.filter(
+            (log) => log.toolName === 'search_memories'
+          );
+          const upsertCalls = context.operationLog.filter(
+            (log) => log.toolName === 'upsert_memories'
+          );
           const attemptedMemoriesCount = upsertCalls.reduce(
             (sum, call) => sum + (call.diagnostics?.memoriesCount || 0),
             0
           );
 
           // Filter to only searches that actually returned results
-          const searchCallsWithResults = searchCalls.filter(call => {
+          const searchCallsWithResults = searchCalls.filter((call) => {
             const hitCount =
-              call.diagnostics?.searchResultCount ??
-              call.diagnostics?.searchResultIds?.length ??
-              0;
+              call.diagnostics?.searchResultCount ?? call.diagnostics?.searchResultIds?.length ?? 0;
             return hitCount > 0 && !call.diagnostics?.errorMessage;
           });
 
           // If searches found results but no upserts (or only no-op upserts), likely deduplication
-          if (searchCallsWithResults.length > 0 && (upsertCalls.length === 0 || attemptedMemoriesCount === 0)) {
+          if (
+            searchCallsWithResults.length > 0 &&
+            (upsertCalls.length === 0 || attemptedMemoriesCount === 0)
+          ) {
             const relatedIds = new Set<string>();
             for (const searchCall of searchCallsWithResults) {
               if (searchCall.diagnostics?.searchResultIds) {
@@ -305,9 +305,10 @@ export class MemorizeOperation {
 
             return {
               action: 'DEDUPLICATED',
-              reason: relatedIds.size > 0
-                ? `Content overlaps with ${relatedIds.size} existing memor${relatedIds.size === 1 ? 'y' : 'ies'} (agent incorrectly claimed storage)`
-                : 'Content appears to duplicate existing memories (agent incorrectly claimed storage)',
+              reason:
+                relatedIds.size > 0
+                  ? `Content overlaps with ${relatedIds.size} existing memor${relatedIds.size === 1 ? 'y' : 'ies'} (agent incorrectly claimed storage)`
+                  : 'Content appears to duplicate existing memories (agent incorrectly claimed storage)',
               remediation: 'Use force: true to bypass deduplication and store anyway',
               relatedIds: relatedIds.size > 0 ? Array.from(relatedIds).slice(0, 5) : undefined,
             };
@@ -340,15 +341,13 @@ export class MemorizeOperation {
     }
 
     // Fallback heuristics when LLM doesn't provide decision
-    const upsertCalls = context.operationLog.filter(log => log.toolName === 'upsert_memories');
-    const searchCalls = context.operationLog.filter(log => log.toolName === 'search_memories');
+    const upsertCalls = context.operationLog.filter((log) => log.toolName === 'upsert_memories');
+    const searchCalls = context.operationLog.filter((log) => log.toolName === 'search_memories');
 
     // Filter to only searches that actually returned results
-    const searchCallsWithResults = searchCalls.filter(call => {
+    const searchCallsWithResults = searchCalls.filter((call) => {
       const hitCount =
-        call.diagnostics?.searchResultCount ??
-        call.diagnostics?.searchResultIds?.length ??
-        0;
+        call.diagnostics?.searchResultCount ?? call.diagnostics?.searchResultIds?.length ?? 0;
       return hitCount > 0 && !call.diagnostics?.errorMessage;
     });
 
@@ -368,9 +367,10 @@ export class MemorizeOperation {
 
         return {
           action: 'DEDUPLICATED',
-          reason: relatedIds.size > 0
-            ? `Content overlaps with ${relatedIds.size} existing memor${relatedIds.size === 1 ? 'y' : 'ies'}`
-            : 'Content appears to duplicate existing memories',
+          reason:
+            relatedIds.size > 0
+              ? `Content overlaps with ${relatedIds.size} existing memor${relatedIds.size === 1 ? 'y' : 'ies'}`
+              : 'Content appears to duplicate existing memories',
           remediation: 'Use force: true to bypass deduplication and store anyway',
           relatedIds: relatedIds.size > 0 ? Array.from(relatedIds).slice(0, 5) : undefined, // Limit to top 5
         };
@@ -579,7 +579,7 @@ export class MemorizeOperation {
           index,
           action: decision.action,
           reason: decision.reason,
-          operationLogSummary: context.operationLog.map(log => ({
+          operationLogSummary: context.operationLog.map((log) => ({
             tool: log.toolName,
             args: log.argsSummary.substring(0, 100),
           })),

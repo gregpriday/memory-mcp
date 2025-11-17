@@ -32,12 +32,16 @@ function categoryEnabled(category: DebugCategory): boolean {
 
 const serialize = (value: unknown) => {
   try {
-    return JSON.stringify(value, (_key, val) => {
-      if (val instanceof Error) {
-        return { name: val.name, message: val.message, stack: val.stack };
-      }
-      return val;
-    }, 2);
+    return JSON.stringify(
+      value,
+      (_key, val) => {
+        if (val instanceof Error) {
+          return { name: val.name, message: val.message, stack: val.stack };
+        }
+        return val;
+      },
+      2
+    );
   } catch (error) {
     return `[unserializable: ${(error as Error).message}]`;
   }

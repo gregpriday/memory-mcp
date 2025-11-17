@@ -1,8 +1,6 @@
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
-export type MemoryBackend = 'postgres';
-
 export interface ProjectDatabaseConfig {
   databaseUrl: string;
 }
@@ -15,21 +13,8 @@ export interface ActiveProjectConfig {
 }
 
 export interface BackendConfig {
-  backend: MemoryBackend;
   activeProject: ActiveProjectConfig;
   projectRegistry: ProjectRegistry;
-}
-
-function parseBackend(): MemoryBackend {
-  const raw = process.env.MEMORY_BACKEND?.trim().toLowerCase();
-
-  if (!raw || raw === 'postgres') {
-    return 'postgres';
-  }
-
-  throw new Error(
-    `Unsupported MEMORY_BACKEND value "${process.env.MEMORY_BACKEND}". Only "postgres" is supported in the new stack.`
-  );
 }
 
 function loadProjectRegistry(): ProjectRegistry {
@@ -51,14 +36,18 @@ function loadProjectRegistry(): ProjectRegistry {
   const parsed = JSON.parse(content);
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error('Project registry must be an object of { projectId: { databaseUrl } } entries.');
+    throw new Error(
+      'Project registry must be an object of { projectId: { databaseUrl } } entries.'
+    );
   }
 
   const registry: ProjectRegistry = {};
 
   for (const [projectId, config] of Object.entries(parsed)) {
     if (!config || typeof config !== 'object' || Array.isArray(config)) {
-      throw new Error(`Invalid configuration for project ${projectId}. Expected object with databaseUrl.`);
+      throw new Error(
+        `Invalid configuration for project ${projectId}. Expected object with databaseUrl.`
+      );
     }
 
     const databaseUrl = (config as ProjectDatabaseConfig).databaseUrl;
@@ -87,18 +76,10 @@ function resolveActiveProject(registry: ProjectRegistry): ActiveProjectConfig {
 }
 
 export function loadBackendConfig(): BackendConfig {
-  const backend = parseBackend();
-
-  if (backend !== 'postgres') {
-    // Currently unreachable, but keeps type narrowing honest.
-    throw new Error(`Backend ${backend} is not supported.`);
-  }
-
   const projectRegistry = loadProjectRegistry();
   const activeProject = resolveActiveProject(projectRegistry);
 
   return {
-    backend,
     projectRegistry,
     activeProject,
   };

@@ -9,7 +9,12 @@ import { MemoryRecord, MemoryDynamics, Importance, MemoryType, EmotionInfo } fro
  * @param now Current date/time
  * @returns Recency score in [0, 1]
  */
-export function getRecencyScore(memory: MemoryRecord | { content: { timestamp: string }; metadata?: { dynamics?: MemoryDynamics } }, now: Date): number {
+export function getRecencyScore(
+  memory:
+    | MemoryRecord
+    | { content: { timestamp: string }; metadata?: { dynamics?: MemoryDynamics } },
+  now: Date
+): number {
   const dynamics = (memory as any).metadata?.dynamics;
   const referenceTimestamp = dynamics?.lastAccessedAt ?? memory.content.timestamp;
   const referenceMs = new Date(referenceTimestamp).getTime();
@@ -23,7 +28,7 @@ export function getRecencyScore(memory: MemoryRecord | { content: { timestamp: s
   // Exponential decay with 30-day half-life: 2^(-ageDays / 30)
   // This ensures that a 30-day-old memory has exactly 50% recency score
   const ageDays = Math.max(0, (nowMs - referenceMs) / (1000 * 60 * 60 * 24));
-  const decay = Math.exp(-Math.log(2) * ageDays / 30);
+  const decay = Math.exp((-Math.log(2) * ageDays) / 30);
   return Math.min(1, Math.max(0, decay));
 }
 
@@ -36,7 +41,9 @@ export function getRecencyScore(memory: MemoryRecord | { content: { timestamp: s
  * @param memory Memory record with access count
  * @returns Usage score in [0, 1]
  */
-export function getUsageScore(memory: MemoryRecord | { metadata?: { dynamics?: MemoryDynamics } }): number {
+export function getUsageScore(
+  memory: MemoryRecord | { metadata?: { dynamics?: MemoryDynamics } }
+): number {
   const dynamics = (memory as any).metadata?.dynamics;
   const rawAccessCount = dynamics?.accessCount;
 
@@ -61,9 +68,7 @@ export function getUsageScore(memory: MemoryRecord | { metadata?: { dynamics?: M
  * @returns Importance score in [0, 1]
  */
 export function getImportanceScore(importance?: Importance): number {
-  return importance === 'high' ? 1.0
-       : importance === 'medium' ? 0.6
-       : 0.3; // low or undefined defaults to 0.3
+  return importance === 'high' ? 1.0 : importance === 'medium' ? 0.6 : 0.3; // low or undefined defaults to 0.3
 }
 
 /**

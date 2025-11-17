@@ -15,11 +15,7 @@ export class EmbeddingService {
    * @param model Embedding model to use (default: 'text-embedding-3-small')
    * @param expectedDimensions Expected dimensions for validation (default: 1536)
    */
-  constructor(
-    apiKey: string,
-    model = 'text-embedding-3-small',
-    expectedDimensions = 1536
-  ) {
+  constructor(apiKey: string, model = 'text-embedding-3-small', expectedDimensions = 1536) {
     this.openai = new OpenAI({ apiKey });
     this.model = model;
     this.expectedDimensions = expectedDimensions;
@@ -78,8 +74,7 @@ export class EmbeddingService {
 
     if (texts.length > 2048) {
       throw new Error(
-        `Batch size ${texts.length} exceeds OpenAI limit of 2048. ` +
-          `Split into smaller batches.`
+        `Batch size ${texts.length} exceeds OpenAI limit of 2048. ` + `Split into smaller batches.`
       );
     }
 

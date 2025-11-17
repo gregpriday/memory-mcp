@@ -402,20 +402,18 @@ class Parser {
  * Known denormalized columns in the memories table
  * These map directly to columns instead of using JSONB access
  */
-const DENORMALIZED_COLUMNS: Record<
-  string,
-  { column: string; type: 'text' | 'integer' | 'array' }
-> = {
-  topic: { column: 'topic', type: 'text' },
-  importance: { column: 'importance', type: 'integer' },
-  tags: { column: 'tags', type: 'array' },
-  source: { column: 'source', type: 'text' },
-  sourcePath: { column: 'source_path', type: 'text' },
-  source_path: { column: 'source_path', type: 'text' },
-  kind: { column: 'kind', type: 'text' },
-  memoryType: { column: 'memory_type', type: 'text' },
-  memory_type: { column: 'memory_type', type: 'text' },
-};
+const DENORMALIZED_COLUMNS: Record<string, { column: string; type: 'text' | 'integer' | 'array' }> =
+  {
+    topic: { column: 'topic', type: 'text' },
+    importance: { column: 'importance', type: 'integer' },
+    tags: { column: 'tags', type: 'array' },
+    source: { column: 'source', type: 'text' },
+    sourcePath: { column: 'source_path', type: 'text' },
+    source_path: { column: 'source_path', type: 'text' },
+    kind: { column: 'kind', type: 'text' },
+    memoryType: { column: 'memory_type', type: 'text' },
+    memory_type: { column: 'memory_type', type: 'text' },
+  };
 
 export interface SQLTranslation {
   sql: string;
@@ -478,12 +476,7 @@ class SQLTranslator {
       const denormalized = DENORMALIZED_COLUMNS[field.name];
 
       if (denormalized) {
-        return this.translateDenormalizedField(
-          denormalized,
-          normalizedOp,
-          value,
-          field.name
-        );
+        return this.translateDenormalizedField(denormalized, normalizedOp, value, field.name);
       } else {
         return this.translateJSONBField(field.name, normalizedOp, value);
       }
@@ -520,9 +513,7 @@ class SQLTranslator {
     // Array containment
     if (type === 'array' && operator === 'CONTAINS') {
       if (typeof value.value !== 'string') {
-        throw new Error(
-          `Array CONTAINS requires string value, got ${typeof value.value}`
-        );
+        throw new Error(`Array CONTAINS requires string value, got ${typeof value.value}`);
       }
       const paramPlaceholder = this.addParam(value.value);
       return `${paramPlaceholder} = ANY(${column})`;
@@ -557,9 +548,7 @@ class SQLTranslator {
       // metadata->'field' @> '"value"'::jsonb (for string values)
       // Note: This assumes the JSONB field contains an array
       if (typeof value.value !== 'string') {
-        throw new Error(
-          `JSONB array CONTAINS requires string value, got ${typeof value.value}`
-        );
+        throw new Error(`JSONB array CONTAINS requires string value, got ${typeof value.value}`);
       }
 
       // Create a JSON array with the single value to check containment

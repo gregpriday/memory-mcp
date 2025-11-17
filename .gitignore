@@ -37,6 +37,7 @@ test-data/
 *.tmp
 *.temp
 .cache/
+.eslintcache
 
 # Project specific
 data/

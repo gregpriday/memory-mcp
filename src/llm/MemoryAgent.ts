@@ -392,7 +392,9 @@ export class MemoryAgent {
         // Fire-and-forget fallback tracking for memories not already tracked during search_memories calls
         // This handles edge cases where LLM short-circuits, uses cached results, or returns memories
         // from get_memories instead of search_memories
-        const untrackedIds = Array.from(allMemoryIds).filter(id => !context.trackedMemoryIds.has(id));
+        const untrackedIds = Array.from(allMemoryIds).filter(
+          (id) => !context.trackedMemoryIds.has(id)
+        );
 
         if (untrackedIds.length > 0) {
           const config = loadRefinementConfig();
@@ -429,7 +431,8 @@ export class MemoryAgent {
         memories: result.memories,
         supportingMemories: result.supportingMemories,
         searchStatus,
-        searchDiagnostics: context.searchDiagnostics.length > 0 ? context.searchDiagnostics : undefined,
+        searchDiagnostics:
+          context.searchDiagnostics.length > 0 ? context.searchDiagnostics : undefined,
       };
     } catch (error) {
       console.error('Recall error:', error);
@@ -596,11 +599,7 @@ export class MemoryAgent {
   ): Promise<RefineMemoriesResult> {
     try {
       // Call reflection to synthesize beliefs from patterns
-      const reflectionResult = await this.reflectOnMemories(
-        index,
-        scope,
-        projectSystemMessage
-      );
+      const reflectionResult = await this.reflectOnMemories(index, scope, projectSystemMessage);
 
       if (reflectionResult.beliefs.length === 0) {
         return {
@@ -615,22 +614,20 @@ export class MemoryAgent {
       }
 
       // Convert beliefs to MemoryToUpsert format for storage
-      const beliefsToStore: MemoryToUpsert[] = reflectionResult.beliefs.map(
-        (belief: any) => ({
-          text: belief.text,
-          metadata: {
-            index,
-            memoryType: belief.memoryType || 'belief',
-            kind: belief.kind || 'derived',
-            stability: belief.stability || 'stable',
-            importance: belief.importance || 'medium',
-            topic: belief.topic,
-            tags: belief.tags || ['belief', 'from_reflection', 'synthesized'],
-            derivedFromIds: belief.derivedFromIds || [],
-            relationships: belief.relationships || [],
-          },
-        })
-      );
+      const beliefsToStore: MemoryToUpsert[] = reflectionResult.beliefs.map((belief: any) => ({
+        text: belief.text,
+        metadata: {
+          index,
+          memoryType: belief.memoryType || 'belief',
+          kind: belief.kind || 'derived',
+          stability: belief.stability || 'stable',
+          importance: belief.importance || 'medium',
+          topic: belief.topic,
+          tags: belief.tags || ['belief', 'from_reflection', 'synthesized'],
+          derivedFromIds: belief.derivedFromIds || [],
+          relationships: belief.relationships || [],
+        },
+      }));
 
       // Only upsert beliefs if not in dry-run mode
       let createdIds: string[] = [];
@@ -727,7 +724,8 @@ export class MemoryAgent {
         };
         const minLevel = importanceLevels[scope.minImportance.toLowerCase()] ?? 0;
         if (minLevel === 1) {
-          filterExpression += ' AND (@metadata.importance = "medium" OR @metadata.importance = "high")';
+          filterExpression +=
+            ' AND (@metadata.importance = "medium" OR @metadata.importance = "high")';
         } else if (minLevel === 2) {
           filterExpression += ' AND @metadata.importance = "high"';
         }
@@ -777,15 +775,11 @@ export class MemoryAgent {
 
       // Validate response structure
       if (response.status !== 'ok') {
-        throw new Error(
-          `Reflection LLM returned error: ${response.error || 'Unknown error'}`
-        );
+        throw new Error(`Reflection LLM returned error: ${response.error || 'Unknown error'}`);
       }
 
       if (!Array.isArray(response.beliefs)) {
-        throw new Error(
-          'Reflection response must contain an array of beliefs'
-        );
+        throw new Error('Reflection response must contain an array of beliefs');
       }
 
       // Validate each belief
@@ -800,9 +794,7 @@ export class MemoryAgent {
           validationErrors.push(`Belief ${i}: missing required field 'text'`);
         }
         if (belief.kind !== 'derived') {
-          validationErrors.push(
-            `Belief ${i}: 'kind' must be 'derived', got '${belief.kind}'`
-          );
+          validationErrors.push(`Belief ${i}: 'kind' must be 'derived', got '${belief.kind}'`);
         }
         if (!['belief', 'self'].includes(belief.memoryType)) {
           validationErrors.push(
@@ -910,9 +902,7 @@ export class MemoryAgent {
 
         for (const id of pattern.derivedFromIds) {
           if (!availableMemoryIds.has(id)) {
-            errors.push(
-              `Pattern ${i}: derivedFromIds references unknown memory ID '${id}'`
-            );
+            errors.push(`Pattern ${i}: derivedFromIds references unknown memory ID '${id}'`);
           }
         }
       } else {
@@ -1034,7 +1024,8 @@ export class MemoryAgent {
               memoryType: newMemory.metadata?.memoryType ?? (newMemory as any).memoryType,
               importance: newMemory.metadata?.importance ?? (newMemory as any).importance,
               topic: newMemory.metadata?.topic ?? (newMemory as any).topic,
-              derivedFromIds: newMemory.metadata?.derivedFromIds ?? (newMemory as any).derivedFromIds,
+              derivedFromIds:
+                newMemory.metadata?.derivedFromIds ?? (newMemory as any).derivedFromIds,
               relationships: newMemory.metadata?.relationships ?? (newMemory as any).relationships,
             };
           })
@@ -1061,7 +1052,9 @@ export class MemoryAgent {
             // If search fails, mark consolidation as unavailable but continue with other validations
             console.error('Failed to fetch memories for consolidation validation:', err);
             const errorMessage = err instanceof Error ? err.message : String(err);
-            validationErrors.push(`Consolidation skipped: unable to load memory IDs - ${errorMessage}`);
+            validationErrors.push(
+              `Consolidation skipped: unable to load memory IDs - ${errorMessage}`
+            );
             consolidationIdsUnavailable = true;
           }
 
@@ -1157,7 +1150,7 @@ export class MemoryAgent {
       });
 
       return {
-        status: executionResult.hasErrors ? 'error' : (budgetReached ? 'budget_reached' : 'ok'),
+        status: executionResult.hasErrors ? 'error' : budgetReached ? 'budget_reached' : 'ok',
         index,
         dryRun: false,
         summary: executionResult.summary,
@@ -1231,11 +1224,12 @@ export class MemoryAgent {
             appliedCount++;
             break;
 
-          case 'CREATE':
+          case 'CREATE': {
             const createdIds = await this.executeCreateAction(action, index);
             newMemoryIds.push(...createdIds);
             appliedCount++;
             break;
+          }
 
           case 'DELETE':
             await this.executeDeleteAction(action, index);
@@ -1268,10 +1262,7 @@ export class MemoryAgent {
   /**
    * Execute an UPDATE action: modify existing memory metadata or text
    */
-  private async executeUpdateAction(
-    action: UpdateRefinementAction,
-    index: string
-  ): Promise<void> {
+  private async executeUpdateAction(action: UpdateRefinementAction, index: string): Promise<void> {
     // Fetch the existing memory
     const existingMemory = await this.repo.getMemory(index, action.id);
     if (!existingMemory) {
@@ -1286,25 +1277,19 @@ export class MemoryAgent {
     };
 
     // Upsert with the existing ID to update
-    await this.repo.upsertMemories(
-      index,
-      [
-        {
-          id: action.id,
-          text: updatedText,
-          metadata: updatedMetadata,
-        },
-      ]
-    );
+    await this.repo.upsertMemories(index, [
+      {
+        id: action.id,
+        text: updatedText,
+        metadata: updatedMetadata,
+      },
+    ]);
   }
 
   /**
    * Execute a MERGE action: consolidate multiple memories into one
    */
-  private async executeMergeAction(
-    action: MergeRefinementAction,
-    index: string
-  ): Promise<void> {
+  private async executeMergeAction(action: MergeRefinementAction, index: string): Promise<void> {
     // Fetch the target memory
     const targetMemory = await this.repo.getMemory(index, action.targetId);
     if (!targetMemory) {
@@ -1334,36 +1319,33 @@ export class MemoryAgent {
     ];
 
     // Update target memory
-    await this.repo.upsertMemories(
-      index,
-      [
-        {
-          id: action.targetId,
-          text: mergedText,
-          metadata: mergedMetadata,
-        },
-      ]
-    );
+    await this.repo.upsertMemories(index, [
+      {
+        id: action.targetId,
+        text: mergedText,
+        metadata: mergedMetadata,
+      },
+    ]);
 
     // Mark source memories as superseded and delete them
-    const sourceIds = action.mergeSourceIds.filter(id => id !== action.targetId);
+    const sourceIds = action.mergeSourceIds.filter((id) => id !== action.targetId);
     if (sourceIds.length > 0) {
       // SECURITY: Filter out system memories (never delete sys_* IDs or memories with source === 'system')
-      const safeIds = sourceIds.filter(id => {
-        const memory = sourceMemories.find(m => m.id === id);
+      const safeIds = sourceIds.filter((id) => {
+        const memory = sourceMemories.find((m) => m.id === id);
         return !id.startsWith('sys_') && memory?.metadata?.source !== 'system';
       });
 
-      const skippedIds = sourceIds.filter(id => {
-        const memory = sourceMemories.find(m => m.id === id);
+      const skippedIds = sourceIds.filter((id) => {
+        const memory = sourceMemories.find((m) => m.id === id);
         return id.startsWith('sys_') || memory?.metadata?.source === 'system';
       });
 
       if (safeIds.length > 0) {
         // First, update source memories with supersededById
         const updatedSources = sourceMemories
-          .filter(mem => safeIds.includes(mem.id))
-          .map(mem => ({
+          .filter((mem) => safeIds.includes(mem.id))
+          .map((mem) => ({
             id: mem.id,
             text: mem.content.text,
             metadata: {
@@ -1452,7 +1434,7 @@ export class MemoryAgent {
       try {
         // Fetch each episodic memory and mark as superseded
         const episodicMemories = await this.repo.getMemories(index, episodicIds);
-        const supersessionUpdates = episodicMemories.map(episodic => ({
+        const supersessionUpdates = episodicMemories.map((episodic) => ({
           id: episodic.id,
           text: episodic.content.text,
           metadata: {
@@ -1478,12 +1460,9 @@ export class MemoryAgent {
   /**
    * Execute a DELETE action: remove memories from the index
    */
-  private async executeDeleteAction(
-    action: DeleteRefinementAction,
-    index: string
-  ): Promise<void> {
+  private async executeDeleteAction(action: DeleteRefinementAction, index: string): Promise<void> {
     // Filter out system IDs (never delete sys_* IDs)
-    const safeIds = action.deleteIds.filter(id => !id.startsWith('sys_'));
+    const safeIds = action.deleteIds.filter((id) => !id.startsWith('sys_'));
     if (safeIds.length === 0) {
       return;
     }
@@ -1587,10 +1566,7 @@ export class MemoryAgent {
    * console.log(result.diagnostics); // Search timing, retry counts, pending docs
    * ```
    */
-  async scanMemories(
-    args: ScanMemoriesToolArgs,
-    index: string
-  ): Promise<ScanMemoriesResult> {
+  async scanMemories(args: ScanMemoriesToolArgs, index: string): Promise<ScanMemoriesResult> {
     const diagnostics: SearchDiagnostics[] = [];
 
     try {
@@ -1651,9 +1627,8 @@ export class MemoryAgent {
         status: 'error',
         index,
         error: (error as Error).message,
-        searchStatus: diagnostics.length > 0
-          ? diagnostics[diagnostics.length - 1]?.status
-          : undefined,
+        searchStatus:
+          diagnostics.length > 0 ? diagnostics[diagnostics.length - 1]?.status : undefined,
         diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
       };
     }

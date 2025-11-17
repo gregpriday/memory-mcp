@@ -1,5 +1,8 @@
 import OpenAI from 'openai';
-import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions';
+import type {
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+} from 'openai/resources/chat/completions';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -276,7 +279,7 @@ Assistant: ["email style guide formatting preferences", "email communication tem
       // Validate and filter variations
       const validVariations = variations
         .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-        .map(v => v.trim())
+        .map((v) => v.trim())
         .slice(0, count);
 
       return validVariations;

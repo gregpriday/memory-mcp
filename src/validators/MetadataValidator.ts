@@ -13,17 +13,9 @@ export class MetadataValidator {
     'semantic',
   ];
 
-  private static readonly VALID_IMPORTANCE_LEVELS: Importance[] = [
-    'low',
-    'medium',
-    'high',
-  ];
+  private static readonly VALID_IMPORTANCE_LEVELS: Importance[] = ['low', 'medium', 'high'];
 
-  private static readonly VALID_STABILITY_VALUES = [
-    'tentative',
-    'stable',
-    'canonical',
-  ];
+  private static readonly VALID_STABILITY_VALUES = ['tentative', 'stable', 'canonical'];
 
   private static readonly VALID_RELATIONSHIP_TYPES: RelationshipType[] = [
     'summarizes',
@@ -112,9 +104,7 @@ export class MetadataValidator {
     // Validate date format if present
     if (metadata.date !== undefined) {
       if (!this.isValidDateFormat(metadata.date)) {
-        throw new ValidationError(
-          'date must be in YYYY-MM-DD format'
-        );
+        throw new ValidationError('date must be in YYYY-MM-DD format');
       }
     }
 
@@ -142,9 +132,7 @@ export class MetadataValidator {
     if (metadata.emotion?.intensity !== undefined) {
       const intensity = metadata.emotion.intensity;
       if (typeof intensity !== 'number' || intensity < 0 || intensity > 1) {
-        throw new ValidationError(
-          'emotion.intensity must be a number between 0.0 and 1.0'
-        );
+        throw new ValidationError('emotion.intensity must be a number between 0.0 and 1.0');
       }
     }
   }
@@ -168,33 +156,33 @@ export class MetadataValidator {
 
     // Validate priority values if present
     if (dynamics.initialPriority !== undefined) {
-      if (typeof dynamics.initialPriority !== 'number' ||
-          dynamics.initialPriority < 0 ||
-          dynamics.initialPriority > 1) {
-        throw new ValidationError(
-          'dynamics.initialPriority must be a number between 0.0 and 1.0'
-        );
+      if (
+        typeof dynamics.initialPriority !== 'number' ||
+        dynamics.initialPriority < 0 ||
+        dynamics.initialPriority > 1
+      ) {
+        throw new ValidationError('dynamics.initialPriority must be a number between 0.0 and 1.0');
       }
     }
 
     if (dynamics.currentPriority !== undefined) {
-      if (typeof dynamics.currentPriority !== 'number' ||
-          dynamics.currentPriority < 0 ||
-          dynamics.currentPriority > 1) {
-        throw new ValidationError(
-          'dynamics.currentPriority must be a number between 0.0 and 1.0'
-        );
+      if (
+        typeof dynamics.currentPriority !== 'number' ||
+        dynamics.currentPriority < 0 ||
+        dynamics.currentPriority > 1
+      ) {
+        throw new ValidationError('dynamics.currentPriority must be a number between 0.0 and 1.0');
       }
     }
 
     // Validate accessCount if present
     if (dynamics.accessCount !== undefined) {
-      if (typeof dynamics.accessCount !== 'number' ||
-          dynamics.accessCount < 0 ||
-          !Number.isInteger(dynamics.accessCount)) {
-        throw new ValidationError(
-          'dynamics.accessCount must be a non-negative integer'
-        );
+      if (
+        typeof dynamics.accessCount !== 'number' ||
+        dynamics.accessCount < 0 ||
+        !Number.isInteger(dynamics.accessCount)
+      ) {
+        throw new ValidationError('dynamics.accessCount must be a non-negative integer');
       }
     }
 
@@ -222,9 +210,7 @@ export class MetadataValidator {
       }
 
       if (typeof rel.targetId !== 'string') {
-        throw new ValidationError(
-          `relationships[${index}].targetId must be a string`
-        );
+        throw new ValidationError(`relationships[${index}].targetId must be a string`);
       }
 
       if (!this.VALID_RELATIONSHIP_TYPES.includes(rel.type)) {
@@ -234,9 +220,7 @@ export class MetadataValidator {
       }
 
       if (rel.weight !== undefined) {
-        if (typeof rel.weight !== 'number' ||
-            rel.weight < 0 ||
-            rel.weight > 1) {
+        if (typeof rel.weight !== 'number' || rel.weight < 0 || rel.weight > 1) {
           throw new ValidationError(
             `relationships[${index}].weight must be a number between 0.0 and 1.0`
           );

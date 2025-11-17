@@ -63,9 +63,13 @@ export class PromptManager {
         if (content) {
           return content;
         }
-        console.error(`Warning: File "${filePath}" exists but is empty. Falling back to treating env var as inline text.`);
+        console.error(
+          `Warning: File "${filePath}" exists but is empty. Falling back to treating env var as inline text.`
+        );
       } catch (error) {
-        console.error(`Warning: Failed to load MEMORY_MCP_SYSTEM_MESSAGE from file "${filePath}": ${(error as Error).message}`);
+        console.error(
+          `Warning: Failed to load MEMORY_MCP_SYSTEM_MESSAGE from file "${filePath}": ${(error as Error).message}`
+        );
         console.error('Falling back to treating it as inline text.');
       }
     }
@@ -120,13 +124,7 @@ export class PromptManager {
       if (parts.length > 0 && parts[0].includes(hostPlaceholderToken)) {
         parts[0] = parts[0].replace(hostPlaceholderToken, hostContext);
       } else {
-        parts.unshift(
-          [
-            '[HOST CONTEXT]',
-            hostContext,
-            '[END HOST CONTEXT]',
-          ].join('\n')
-        );
+        parts.unshift(['[HOST CONTEXT]', hostContext, '[END HOST CONTEXT]'].join('\n'));
       }
     }
 
