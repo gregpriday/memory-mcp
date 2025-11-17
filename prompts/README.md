@@ -20,6 +20,7 @@ The foundation prompt that defines the agent's role and responsibilities.
 **Purpose:** Establishes the agent as a memory management system powered by GPT-5
 
 **Key concepts:**
+
 - Interpret natural language instructions
 - Use internal tools instead of hallucinating
 - Operate within specific memory indexes
@@ -75,6 +76,7 @@ Guides the agent in analyzing stored memories and creating refinement plans for 
 **Version:** 1.0 - Initial refine prompt with three operation modes
 
 **Key concepts:**
+
 - **Consolidation mode**: Merge duplicates, create summaries, detect contradictions, link related memories
 - **Decay mode**: Reprioritize memories using deterministic priority formula based on recency, usage, and importance
 - **Cleanup mode**: Identify deletion candidates (low priority, superseded, obsolete) as dry-run recommendations
@@ -93,6 +95,7 @@ Classification guide for semantic memory typing during the memorize operation.
 **Used in:** Memorize mode (`memory-memorize`), analyzer mode (`memory-analyzer`), and chunked file ingestion
 
 **Classification types:**
+
 1. **Self Memory**: First-person identity statements about the persona
 2. **Belief Memory**: Generalizations and stable stances (not personal identity)
 3. **Pattern Memory**: Repeated behaviors, procedures, or templates
@@ -100,12 +103,14 @@ Classification guide for semantic memory typing during the memorize operation.
 5. **Semantic Memory**: General facts or principles independent of persona
 
 **Key features:**
+
 - Clear decision tree with examples for each type
 - Worked examples (1 per type) showing input → reasoning → JSON output
 - Decision order: Self → Belief → Pattern → Episodic → Semantic
 - Required `memoryType` field in memory metadata (one of the five types)
 
 **Integration:**
+
 - Composed with `memory-memorize` in memorize mode
 - Composed with `memory-analyzer` in analyzer mode
 - Applied consistently across all memory extraction flows
@@ -122,10 +127,10 @@ Reusable prompt for analyzing text and extracting structured information.
 
 ## Model Selection
 
-| Prompt | Model | Rationale |
-|--------|-------|-----------|
-| memory-base + mode prompts | GPT-5 | Complex reasoning, tool orchestration |
-| memory-analyzer (analyze_text) | GPT-5-mini | Fast, cost-effective text analysis |
+| Prompt                         | Model      | Rationale                             |
+| ------------------------------ | ---------- | ------------------------------------- |
+| memory-base + mode prompts     | GPT-5      | Complex reasoning, tool orchestration |
+| memory-analyzer (analyze_text) | GPT-5-mini | Fast, cost-effective text analysis    |
 
 ## Usage in Code
 
@@ -135,20 +140,19 @@ Prompts are composed at runtime using `PromptManager`:
 // Memorize with classification
 const systemPrompt = prompts.composePrompt(
   ['memory-base', 'memory-memorize', 'memory-memorize-classify'],
-  projectSystemMessage  // Optional project context
+  projectSystemMessage // Optional project context
 );
 
 // Analyzer with classification
-const analyzerPrompt = prompts.composePrompt(
-  ['memory-analyzer', 'memory-memorize-classify']
-);
+const analyzerPrompt = prompts.composePrompt(['memory-analyzer', 'memory-memorize-classify']);
 ```
 
 ### Host Context
 
-The host context is intended for the *calling agent* (e.g., AppsDash) to tell the memory server what role it plays in the overall system and what kinds of information should be stored or avoided.
+The host context is intended for the _calling agent_ (e.g., AppsDash) to tell the memory server what role it plays in the overall system and what kinds of information should be stored or avoided.
 
 Host context is loaded from `MEMORY_MCP_SYSTEM_MESSAGE` environment variable, which supports:
+
 - **Inline text**: The message is provided directly as a string
 - **File path**: A path to a text file (absolute or relative to `process.cwd()`)
   - File paths are detected by checking if the file actually exists on disk
@@ -185,19 +189,23 @@ All prompts include version metadata in the following format:
 ```
 
 **Version numbering:**
+
 - Major version (X.0): Breaking changes, significant restructuring, or new capabilities
 - Minor version (X.Y): Enhancements, clarifications, or non-breaking additions
 
 **Placement:**
+
 - Place version metadata at the top of the prompt, immediately after the `## MODE` header
 - This ensures visibility without interfering with the core prompt content
 
 **Changelog guidelines:**
+
 - Keep changelog entries concise (one line)
 - Focus on what changed from the user/agent perspective
 - For initial releases, use "Initial [mode] prompt"
 
 **Example:**
+
 ```
 ## RECALL MODE
 

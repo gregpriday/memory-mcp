@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Testing
+coverage/
+test-data/
+
+# Temporary files
+.cache/
+.eslintcache
+
+# Project specific
+data/
+
+# Lock files (auto-generated)
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
