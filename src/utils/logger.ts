@@ -24,7 +24,7 @@ function categoryEnabled(category: DebugCategory): boolean {
     case 'repository':
       return debugConfig.logRepository;
     case 'query-expansion':
-      return debugConfig.logOperations;
+      return debugConfig.logQueryExpansion; // Now uses dedicated MEMORY_DEBUG_QUERY_EXPANSION flag
     default:
       return false;
   }
