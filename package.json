@@ -11,6 +11,7 @@
     "migrate": "tsx scripts/run-migrations.ts migrate",
     "migrate:seed": "tsx scripts/run-migrations.ts seed",
     "migrate:verify": "tsx scripts/run-migrations.ts verify",
+    "test:indexes": "tsx --test tests/indexTools.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{ts,js,json}\"",
