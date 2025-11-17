@@ -207,7 +207,9 @@ async function verifySchema(client: pg.Client): Promise<void> {
   if (triggers.rows.length > 0) {
     console.log(`   ✓ memories_updated_at trigger exists`);
   } else {
-    console.log(`   ✗ memories_updated_at trigger NOT FOUND`);
+    throw new Error(
+      `❌ memories_updated_at trigger NOT FOUND - trigger is required for automatic updated_at maintenance`
+    );
   }
 
   // Check default data
