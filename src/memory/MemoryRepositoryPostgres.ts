@@ -9,6 +9,13 @@ import {
   SearchDiagnostics,
   Importance,
   Relationship,
+  TypeDistributionReport,
+  TopBeliefsReport,
+  BeliefSummary,
+  EmotionMapReport,
+  RelationshipGraphReport,
+  PriorityHealthReport,
+  MemoryType,
 } from './types.js';
 import { IMemoryRepository, DatabaseInfo, IndexInfo, IndexSummary } from './IMemoryRepository.js';
 import { PoolManager } from './PoolManager.js';
@@ -1673,6 +1680,453 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       type: edge.type,
       metadata: edge.metadata ?? undefined,
     }));
+  }
+
+  /**
+   * Get memory type distribution report.
+   */
+  async getTypeDistribution(indexName: string): Promise<TypeDistributionReport> {
+    const indexId = await this.resolveIndexId(indexName);
+
+    const result = await this.runQuery<{
+      memory_type: string | null;
+      count: string;
+      avg_priority: string;
+    }>(
+      'type-distribution',
+      `
+      SELECT
+        COALESCE(memory_type, 'semantic') AS memory_type,
+        COUNT(*) AS count,
+        ROUND(AVG(current_priority)::numeric, 4)::float AS avg_priority
+      FROM memories
+      WHERE index_id = $1 AND project = $2
+      GROUP BY memory_type
+      ORDER BY count DESC
+      `,
+      [indexId, this.projectId]
+    );
+
+    const totalMemories = result.rows.reduce((sum, row) => sum + parseInt(row.count, 10), 0);
+    const distribution: Record<
+      MemoryType,
+      { count: number; percentage: number; avgPriority: number }
+    > = {
+      self: { count: 0, percentage: 0, avgPriority: 0 },
+      belief: { count: 0, percentage: 0, avgPriority: 0 },
+      pattern: { count: 0, percentage: 0, avgPriority: 0 },
+      episodic: { count: 0, percentage: 0, avgPriority: 0 },
+      semantic: { count: 0, percentage: 0, avgPriority: 0 },
+    };
+
+    for (const row of result.rows) {
+      const type = (row.memory_type || 'semantic') as MemoryType;
+      const count = parseInt(row.count, 10);
+      const avgPriority = parseFloat(row.avg_priority);
+      distribution[type] = {
+        count,
+        percentage: totalMemories > 0 ? Math.round((count / totalMemories) * 10000) / 100 : 0,
+        avgPriority,
+      };
+    }
+
+    return { totalMemories, distribution };
+  }
+
+  /**
+   * Get top memories by priority.
+   */
+  async getTopMemoriesByPriority(
+    indexName: string,
+    options?: { type?: string; minPriority?: number; limit?: number }
+  ): Promise<TopBeliefsReport> {
+    const indexId = await this.resolveIndexId(indexName);
+    const limit = Math.min(options?.limit ?? 20, 100);
+    const minPriority = options?.minPriority ?? 0.0;
+
+    // Build query
+    let whereClause = 'WHERE m.index_id = $1 AND m.project = $2 AND m.current_priority >= $3';
+    const params: unknown[] = [indexId, this.projectId, minPriority];
+
+    if (options?.type) {
+      whereClause += ` AND m.memory_type = $${params.length + 1}`;
+      params.push(options.type);
+    }
+
+    const result = await this.runQuery<{
+      id: string;
+      content: string;
+      current_priority: number;
+      stability: string | null;
+      access_count: number;
+      emotion_intensity: number | null;
+      emotion_label: string | null;
+      related_count: string;
+    }>(
+      'top-beliefs',
+      `
+      SELECT
+        m.id,
+        m.content AS content,
+        m.current_priority,
+        m.stability,
+        m.access_count,
+        (m.metadata->'emotion'->>'intensity')::float AS emotion_intensity,
+        m.metadata->'emotion'->>'label' AS emotion_label,
+        COALESCE(rel_counts.count, 0)::text AS related_count
+      FROM memories m
+      LEFT JOIN (
+        SELECT source_id, COUNT(*) as count
+        FROM memory_relationships
+        WHERE project = $2 AND index_id = $1
+        GROUP BY source_id
+      ) rel_counts ON m.id = rel_counts.source_id
+      ${whereClause}
+      ORDER BY m.current_priority DESC, m.access_count DESC
+      LIMIT $${params.length + 1}
+      `,
+      [...params, limit]
+    );
+
+    // Get total belief count
+    const totalResult = await this.runQuery<{ count: string }>(
+      'total-beliefs-count',
+      `SELECT COUNT(*) as count FROM memories WHERE index_id = $1 AND project = $2 AND memory_type = 'belief'`,
+      [indexId, this.projectId]
+    );
+    const totalBeliefs = parseInt(totalResult.rows[0]?.count ?? '0', 10);
+
+    // Get canonical count
+    const canonicalResult = await this.runQuery<{ count: string }>(
+      'canonical-beliefs-count',
+      `SELECT COUNT(*) as count FROM memories WHERE index_id = $1 AND project = $2 AND stability = 'canonical'`,
+      [indexId, this.projectId]
+    );
+    const canonicalCount = parseInt(canonicalResult.rows[0]?.count ?? '0', 10);
+
+    // Get average priority
+    const avgResult = await this.runQuery<{ avg: string }>(
+      'avg-beliefs-priority',
+      `SELECT ROUND(AVG(current_priority)::numeric, 4)::float as avg FROM memories WHERE index_id = $1 AND project = $2`,
+      [indexId, this.projectId]
+    );
+    const avgBeliefsPriority = avgResult.rows[0]?.avg ? parseFloat(avgResult.rows[0].avg) : 0;
+
+    const beliefs: BeliefSummary[] = result.rows.map((row) => ({
+      id: row.id,
+      text: row.content,
+      priority: row.current_priority,
+      stability: (row.stability as 'tentative' | 'stable' | 'canonical' | null) ?? undefined,
+      emotion:
+        row.emotion_intensity !== null || row.emotion_label
+          ? {
+              intensity: row.emotion_intensity ?? undefined,
+              label: row.emotion_label ?? undefined,
+            }
+          : undefined,
+      accessCount: row.access_count,
+      relatedCount: parseInt(row.related_count, 10),
+    }));
+
+    return { beliefs, totalBeliefs, canonicalCount, avgBeliefsPriority };
+  }
+
+  /**
+   * Get emotional memories analysis.
+   */
+  async getEmotionalMemories(
+    indexName: string,
+    options?: { minIntensity?: number; emotionLabel?: string; limit?: number }
+  ): Promise<EmotionMapReport> {
+    const indexId = await this.resolveIndexId(indexName);
+    const minIntensity = options?.minIntensity ?? 0.5;
+    const limit = Math.min(options?.limit ?? 50, 200);
+    const emotionIntensityExpr = `
+      (
+        CASE
+          WHEN NULLIF(TRIM(m.metadata->'emotion'->>'intensity'), '') ~ '^[-+]?[0-9]+([.][0-9]+)?$'
+          THEN (NULLIF(TRIM(m.metadata->'emotion'->>'intensity'), ''))::float
+          ELSE NULL
+        END
+      )
+    `;
+
+    // Get high intensity count
+    const highIntensityResult = await this.runQuery<{ count: string }>(
+      'high-intensity-count',
+      `
+      SELECT COUNT(*) as count FROM memories m
+      WHERE m.index_id = $1 AND m.project = $2
+        AND ${emotionIntensityExpr} >= $3
+      `,
+      [indexId, this.projectId, minIntensity]
+    );
+    const highlyEmotional = parseInt(highIntensityResult.rows[0]?.count ?? '0', 10);
+
+    // Get emotions grouped by label
+    const emotionsResult = await this.runQuery<{
+      emotion_label: string;
+      count: string;
+      avg_intensity: string;
+      avg_priority: string;
+    }>(
+      'emotions-by-label',
+      `
+      SELECT
+        COALESCE(m.metadata->'emotion'->>'label', 'unlabeled') AS emotion_label,
+        COUNT(*) AS count,
+        ROUND(AVG(${emotionIntensityExpr})::numeric, 4)::float AS avg_intensity,
+        ROUND(AVG(m.current_priority)::numeric, 4)::float AS avg_priority
+      FROM memories m
+      WHERE m.index_id = $1 AND m.project = $2
+        AND ${emotionIntensityExpr} >= $3
+      GROUP BY emotion_label
+      ORDER BY count DESC
+      `,
+      [indexId, this.projectId, minIntensity]
+    );
+
+    const byLabel: Record<string, { count: number; avgIntensity: number; avgPriority: number }> =
+      {};
+    for (const row of emotionsResult.rows) {
+      byLabel[row.emotion_label] = {
+        count: parseInt(row.count, 10),
+        avgIntensity: parseFloat(row.avg_intensity),
+        avgPriority: parseFloat(row.avg_priority),
+      };
+    }
+
+    // Get top emotional memories
+    const topEmotionalResult = await this.runQuery<{
+      id: string;
+      content: string;
+      emotion_intensity: number;
+      emotion_label: string;
+    }>(
+      'top-emotional-memories',
+      `
+      SELECT
+        m.id,
+        m.content,
+        ${emotionIntensityExpr} AS emotion_intensity,
+        m.metadata->'emotion'->>'label' AS emotion_label
+      FROM memories m
+      WHERE m.index_id = $1 AND m.project = $2
+        AND ${emotionIntensityExpr} >= $3
+      ORDER BY ${emotionIntensityExpr} DESC
+      LIMIT $4
+      `,
+      [indexId, this.projectId, minIntensity, limit]
+    );
+
+    const topEmotionalMemories = topEmotionalResult.rows.map((row) => ({
+      id: row.id,
+      text: row.content,
+      emotion: {
+        intensity: row.emotion_intensity,
+        label: row.emotion_label,
+      },
+    }));
+
+    return { highlyEmotional, byLabel, topEmotionalMemories };
+  }
+
+  /**
+   * Get relationship graph export.
+   */
+  async getRelationshipGraph(
+    indexName: string,
+    options?: {
+      minPriority?: number;
+      includeRelationshipTypes?: string[];
+      maxNodes?: number;
+      maxEdges?: number;
+    }
+  ): Promise<RelationshipGraphReport> {
+    const indexId = await this.resolveIndexId(indexName);
+    const minPriority = options?.minPriority ?? 0.3;
+    const maxNodes = Math.min(options?.maxNodes ?? 100, 200);
+    const maxEdges = Math.min(options?.maxEdges ?? 200, 500);
+
+    // Get high-priority memory nodes
+    const nodeParams: unknown[] = [indexId, this.projectId, minPriority, maxNodes];
+    const nodesResult = await this.runQuery<{
+      id: string;
+      memory_type: string | null;
+      content: string;
+      current_priority: number;
+    }>(
+      'graph-nodes',
+      `
+      SELECT DISTINCT
+        m.id,
+        m.memory_type,
+        m.content,
+        m.current_priority
+      FROM memories m
+      WHERE m.index_id = $1 AND m.project = $2 AND m.current_priority >= $3
+      ORDER BY m.current_priority DESC
+      LIMIT $4
+      `,
+      nodeParams
+    );
+
+    const nodeIds = nodesResult.rows.map((row) => row.id);
+
+    const nodes = nodesResult.rows.map((row) => ({
+      id: row.id,
+      type: (row.memory_type || 'semantic') as MemoryType,
+      text: row.content.substring(0, 200), // Truncate for large graphs
+      priority: row.current_priority,
+    }));
+
+    // Get edges connecting these nodes
+    let edges: RelationshipGraphReport['edges'] = [];
+    if (nodeIds.length > 0) {
+      const edgeParams: unknown[] = [indexId, this.projectId];
+      const nodeArrayParamIndex = edgeParams.push(nodeIds); // ensures placeholders stay sequential
+      let typeFilter = '';
+      if (options?.includeRelationshipTypes && options.includeRelationshipTypes.length > 0) {
+        typeFilter = ` AND mr.relationship_type = ANY($${edgeParams.length + 1}::text[])`;
+        edgeParams.push(options.includeRelationshipTypes);
+      }
+      const limitParamIndex = edgeParams.push(maxEdges);
+
+      const edgesResult = await this.runQuery<{
+        source: string;
+        target: string;
+        type: string;
+        weight: number | null;
+      }>(
+        'graph-edges',
+        `
+        SELECT
+          mr.source_id AS source,
+          mr.target_id AS target,
+          mr.relationship_type AS type,
+          mr.weight
+        FROM memory_relationships mr
+        WHERE mr.index_id = $1 AND mr.project = $2
+          AND mr.source_id = ANY($${nodeArrayParamIndex}::text[])
+          AND mr.target_id = ANY($${nodeArrayParamIndex}::text[])
+          ${typeFilter}
+        LIMIT $${limitParamIndex}
+        `,
+        edgeParams
+      );
+
+      edges = edgesResult.rows.map((row) => ({
+        source: row.source,
+        target: row.target,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        type: row.type as any, // RelationshipType is safe - validated in schema
+        weight: row.weight ?? undefined,
+      }));
+    }
+
+    const note =
+      nodes.length >= maxNodes || edges.length >= maxEdges
+        ? `Graph limited to ${maxNodes} nodes and ${maxEdges} edges for performance`
+        : undefined;
+
+    return { nodes, edges, note };
+  }
+
+  /**
+   * Get priority health report.
+   */
+  async getPriorityHealth(indexName: string): Promise<PriorityHealthReport> {
+    const indexId = await this.resolveIndexId(indexName);
+
+    // Get total counts by priority bucket
+    const statsResult = await this.runQuery<{
+      high_count: string;
+      medium_count: string;
+      low_count: string;
+      total_count: string;
+      avg_priority: string;
+    }>(
+      'priority-stats',
+      `
+      SELECT
+        SUM(CASE WHEN current_priority > 0.7 THEN 1 ELSE 0 END)::text AS high_count,
+        SUM(CASE WHEN current_priority >= 0.3 AND current_priority <= 0.7 THEN 1 ELSE 0 END)::text AS medium_count,
+        SUM(CASE WHEN current_priority < 0.3 THEN 1 ELSE 0 END)::text AS low_count,
+        COUNT(*)::text AS total_count,
+        ROUND(AVG(current_priority)::numeric, 4)::float AS avg_priority
+      FROM memories
+      WHERE index_id = $1 AND project = $2
+      `,
+      [indexId, this.projectId]
+    );
+
+    const stats = statsResult.rows[0];
+    const totalCount = parseInt(stats.total_count || '0', 10);
+    const highCount = parseInt(stats.high_count || '0', 10);
+    const mediumCount = parseInt(stats.medium_count || '0', 10);
+    const lowCount = parseInt(stats.low_count || '0', 10);
+    const avgPriority = parseFloat(stats.avg_priority || '0');
+
+    // Get decaying memories (not accessed in 60 days with priority < 0.2)
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+    const decayingResult = await this.runQuery<{ count: string }>(
+      'decaying-count',
+      `
+      SELECT COUNT(*) as count FROM memories
+      WHERE index_id = $1 AND project = $2
+        AND current_priority < 0.2
+        AND (last_accessed_at IS NULL OR last_accessed_at < $3)
+      `,
+      [indexId, this.projectId, sixtyDaysAgo]
+    );
+    const decayingMemories = parseInt(decayingResult.rows[0]?.count ?? '0', 10);
+
+    // Get canonical count
+    const canonicalResult = await this.runQuery<{ count: string }>(
+      'canonical-count',
+      `SELECT COUNT(*) as count FROM memories WHERE index_id = $1 AND project = $2 AND stability = 'canonical'`,
+      [indexId, this.projectId]
+    );
+    const canonicalMemories = parseInt(canonicalResult.rows[0]?.count ?? '0', 10);
+
+    // Generate recommendations
+    const recommendations: string[] = [];
+    if (lowCount > totalCount * 0.4) {
+      recommendations.push(
+        `Consider running refine_memories to consolidate ${lowCount} low-priority memories`
+      );
+    }
+    if (decayingMemories > 0) {
+      recommendations.push(`${decayingMemories} memories are decaying and not accessed recently`);
+    }
+    if (canonicalMemories > 0) {
+      recommendations.push(`${canonicalMemories} canonical beliefs are stable with high priority`);
+    }
+    if (recommendations.length === 0) {
+      recommendations.push('Memory health is good - no immediate action needed');
+    }
+
+    return {
+      highPriority: {
+        count: highCount,
+        percentage: totalCount > 0 ? Math.round((highCount / totalCount) * 10000) / 100 : 0,
+        threshold: '> 0.7',
+      },
+      mediumPriority: {
+        count: mediumCount,
+        percentage: totalCount > 0 ? Math.round((mediumCount / totalCount) * 10000) / 100 : 0,
+        threshold: '0.3 - 0.7',
+      },
+      lowPriority: {
+        count: lowCount,
+        percentage: totalCount > 0 ? Math.round((lowCount / totalCount) * 10000) / 100 : 0,
+        threshold: '< 0.3',
+      },
+      decayingMemories,
+      canonicalMemories,
+      avgPriority,
+      recommendations,
+    };
   }
 
   /**

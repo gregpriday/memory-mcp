@@ -19,6 +19,7 @@ import {
   RefineMemoriesToolArgs,
   CreateIndexToolArgs,
   ScanMemoriesToolArgs,
+  InspectCharacterToolArgs,
 } from '../memory/types.js';
 import { logInfo, logError, startTimer } from '../utils/logger.js';
 
@@ -349,6 +350,45 @@ export function createMemoryServer(config?: {
             required: ['query'],
           },
         },
+        {
+          name: 'inspect_character',
+          description:
+            'Inspect character memory state from developer perspective: type distribution, top beliefs, emotional map, relationship graph, or priority health.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              index: { type: 'string', description: 'Memory index to inspect.' },
+              view: {
+                type: 'string',
+                enum: [
+                  'type_distribution',
+                  'top_beliefs',
+                  'emotion_map',
+                  'relationship_graph',
+                  'priority_health',
+                ],
+                description: 'Type of inspection report.',
+              },
+              limit: {
+                type: 'number',
+                description: 'Max results for views that support limits (default varies by view).',
+              },
+              minPriority: {
+                type: 'number',
+                description: 'Minimum priority threshold (0.0-1.0) for certain views.',
+              },
+              minIntensity: {
+                type: 'number',
+                description: 'Minimum emotional intensity for emotion_map view.',
+              },
+              emotionLabel: {
+                type: 'string',
+                description: 'Filter by specific emotion label for emotion_map view.',
+              },
+            },
+            required: ['index', 'view'],
+          },
+        },
       ],
     };
   });
@@ -394,6 +434,11 @@ export function createMemoryServer(config?: {
           break;
         case 'scan_memories':
           result = await controller.handleScanMemoriesTool((args ?? {}) as ScanMemoriesToolArgs);
+          break;
+        case 'inspect_character':
+          result = await controller.handleInspectCharacterTool(
+            (args ?? {}) as InspectCharacterToolArgs
+          );
           break;
         case 'remember': {
           const rememberArgs = (args ?? {}) as RememberToolArgs;

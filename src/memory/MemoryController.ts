@@ -1,6 +1,7 @@
 import { IndexResolver } from './IndexResolver.js';
 import { ProjectFileLoader } from './ProjectFileLoader.js';
 import { MemoryAgent } from '../llm/MemoryAgent.js';
+import { CharacterIntrospection } from './CharacterIntrospection.js';
 import {
   MemorizeToolArgs,
   RecallToolArgs,
@@ -8,6 +9,7 @@ import {
   CreateIndexToolArgs,
   RefineMemoriesToolArgs,
   ScanMemoriesToolArgs,
+  InspectCharacterToolArgs,
   MemorizeResult,
   RecallResult,
   ForgetResult,
@@ -15,6 +17,7 @@ import {
   ListIndexesResult,
   RefineMemoriesResult,
   ScanMemoriesResult,
+  InspectCharacterResult,
 } from './types.js';
 
 /**
@@ -80,11 +83,26 @@ export interface McpContent {
  * @public
  */
 export class MemoryController {
+  private introspection: CharacterIntrospection;
+
   constructor(
     private indexResolver: IndexResolver,
     private agent: MemoryAgent,
-    private fileLoader: ProjectFileLoader
-  ) {}
+    private fileLoader: ProjectFileLoader,
+    introspectionService?: CharacterIntrospection
+  ) {
+    if (introspectionService) {
+      this.introspection = introspectionService;
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const repo = (this.agent as any).repository ?? (this.agent as any).repo;
+    if (!repo) {
+      throw new Error('MemoryAgent repository is required for character introspection');
+    }
+    this.introspection = new CharacterIntrospection(repo);
+  }
 
   /**
    * Load project system message if provided
@@ -528,6 +546,48 @@ export class MemoryController {
           error: (error as Error).message,
         },
         'Failed to scan memories',
+        true
+      );
+    }
+  }
+
+  /**
+   * Handle INSPECT_CHARACTER tool
+   */
+  async handleInspectCharacterTool(args: InspectCharacterToolArgs): Promise<McpContent> {
+    try {
+      const index = this.indexResolver.resolve(args.index);
+
+      // Generate introspection report
+      const report = await this.introspection.inspectCharacter(index, args.view, {
+        limit: args.limit,
+        minPriority: args.minPriority,
+        minIntensity: args.minIntensity,
+        emotionLabel: args.emotionLabel,
+      });
+
+      // Generate text summary
+      const summary = this.introspection.summarizeReport(args.view, report);
+
+      const result: InspectCharacterResult = {
+        status: 'ok',
+        index,
+        view: args.view,
+        report,
+      };
+
+      return this.formatResponse(result, summary);
+    } catch (error) {
+      console.error('Inspect character tool error:', error);
+      const result: InspectCharacterResult = {
+        status: 'error',
+        index: args.index ?? this.indexResolver.getDefault(),
+        view: args.view,
+        error: (error as Error).message,
+      };
+      return this.formatResponse(
+        result,
+        `Error inspecting character: ${(error as Error).message}`,
         true
       );
     }

@@ -536,3 +536,234 @@ export interface RefineMemoriesResult {
   /** Error message if status is 'error' */
   error?: string;
 }
+
+// Character introspection types for developer-facing inspection tools
+
+/** Available developer-facing introspection views */
+export type IntrospectionView =
+  | 'type_distribution'
+  | 'top_beliefs'
+  | 'emotion_map'
+  | 'relationship_graph'
+  | 'priority_health';
+
+/**
+ * Statistics for a single memory type category.
+ */
+export interface CharacterTypeBucket {
+  /** Number of memories of this type */
+  count: number;
+
+  /** Percentage of total memories this type represents */
+  percentage: number;
+
+  /** Average priority of memories in this type */
+  avgPriority: number;
+}
+
+/**
+ * Type distribution report showing memory composition by type.
+ */
+export interface TypeDistributionReport {
+  /** Total number of memories in the index */
+  totalMemories: number;
+
+  /** Distribution breakdown by memory type */
+  distribution: Record<MemoryType, CharacterTypeBucket>;
+}
+
+/**
+ * Summary of a belief or high-priority memory.
+ */
+export interface BeliefSummary {
+  /** Memory ID */
+  id: string;
+
+  /** Memory text/content */
+  text: string;
+
+  /** Current priority (0.0-1.0) */
+  priority: number;
+
+  /** Stability indicator */
+  stability?: 'tentative' | 'stable' | 'canonical';
+
+  /** Emotional intensity and label if present */
+  emotion?: EmotionInfo;
+
+  /** Number of times accessed */
+  accessCount: number;
+
+  /** Number of related memories */
+  relatedCount: number;
+}
+
+/**
+ * Top beliefs by priority report.
+ */
+export interface TopBeliefsReport {
+  /** List of top beliefs ordered by priority */
+  beliefs: BeliefSummary[];
+
+  /** Total number of beliefs in the index */
+  totalBeliefs: number;
+
+  /** Number of canonical beliefs */
+  canonicalCount: number;
+
+  /** Average priority across all beliefs */
+  avgBeliefsPriority: number;
+}
+
+/**
+ * Emotional statistics grouped by emotion label.
+ */
+export interface EmotionGroup {
+  /** Number of memories with this emotion */
+  count: number;
+
+  /** Average emotional intensity for this emotion */
+  avgIntensity: number;
+
+  /** Average priority of memories with this emotion */
+  avgPriority: number;
+}
+
+/**
+ * Emotional memory map report.
+ */
+export interface EmotionMapReport {
+  /** Count of highly emotional memories (intensity >= 0.5) */
+  highlyEmotional: number;
+
+  /** Breakdown by emotion label */
+  byLabel: Record<string, EmotionGroup>;
+
+  /** Top emotionally intense memories */
+  topEmotionalMemories: Array<{
+    id: string;
+    text: string;
+    emotion: EmotionInfo;
+  }>;
+}
+
+/**
+ * Node in a relationship graph.
+ */
+export interface GraphNode {
+  /** Memory ID */
+  id: string;
+
+  /** Memory type */
+  type: MemoryType;
+
+  /** Memory text (may be truncated for large graphs) */
+  text: string;
+
+  /** Current priority */
+  priority: number;
+}
+
+/**
+ * Edge in a relationship graph.
+ */
+export interface GraphEdge {
+  /** Source memory ID */
+  source: string;
+
+  /** Target memory ID */
+  target: string;
+
+  /** Relationship type */
+  type: RelationshipType;
+
+  /** Optional relationship weight */
+  weight?: number;
+}
+
+/**
+ * Relationship graph export with nodes and edges.
+ */
+export interface RelationshipGraphReport {
+  /** Graph nodes (memories) */
+  nodes: GraphNode[];
+
+  /** Graph edges (relationships) */
+  edges: GraphEdge[];
+
+  /** Note about limits applied */
+  note?: string;
+}
+
+/**
+ * Priority health statistics.
+ */
+export interface PriorityHealthReport {
+  /** Count of high priority memories (> 0.7) */
+  highPriority: { count: number; percentage: number; threshold: string };
+
+  /** Count of medium priority memories (0.3-0.7) */
+  mediumPriority: { count: number; percentage: number; threshold: string };
+
+  /** Count of low priority memories (< 0.3) */
+  lowPriority: { count: number; percentage: number; threshold: string };
+
+  /** Count of memories not accessed in 60+ days with priority < 0.2 */
+  decayingMemories: number;
+
+  /** Count of canonical/stable memories */
+  canonicalMemories: number;
+
+  /** Average priority across all memories */
+  avgPriority: number;
+
+  /** Recommendations for maintenance */
+  recommendations: string[];
+}
+
+/**
+ * Union type for all introspection report types.
+ */
+export type IntrospectionReport =
+  | TypeDistributionReport
+  | TopBeliefsReport
+  | EmotionMapReport
+  | RelationshipGraphReport
+  | PriorityHealthReport;
+
+/**
+ * Arguments for the inspect_character MCP tool.
+ */
+export interface InspectCharacterToolArgs {
+  /** Index to inspect (required) */
+  index: string;
+
+  /** Introspection view type */
+  view: IntrospectionView;
+
+  /** Optional filters and view-specific parameters */
+  limit?: number;
+  minPriority?: number;
+  minIntensity?: number;
+  emotionLabel?: string;
+}
+
+/**
+ * Result from the inspect_character MCP tool.
+ */
+export interface InspectCharacterResult {
+  /** Operation status */
+  status: 'ok' | 'error';
+
+  /** Index that was inspected */
+  index: string;
+
+  /** Inspection view type */
+  view: IntrospectionView;
+
+  /** The introspection report (structure varies by view type) */
+  report?: IntrospectionReport;
+
+  /** Error message if status is 'error' */
+  error?: string;
+}
