@@ -12,18 +12,15 @@
  *   npm run benchmark:search -- --no-filters
  */
 
-import { join, dirname } from 'path';
+import { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, readFileSync } from 'fs';
 import { MemoryRepositoryPostgres } from '../src/memory/MemoryRepositoryPostgres.js';
 import { FakeEmbeddingService } from '../tests/helpers/FakeEmbeddingService.js';
 import type { MemoryToUpsert } from '../src/memory/types.js';
-import type { ProjectRegistry } from '../src/config/backend.js';
 
-// Get project root directory
+// Get script directory
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const projectRoot = join(__dirname, '..');
 
 /**
  * CLI configuration
@@ -114,40 +111,23 @@ Examples:
  * Load database configuration
  */
 function loadDatabaseUrl(): string {
-  const registryPath =
-    process.env.MEMORY_POSTGRES_PROJECT_REGISTRY?.trim() ||
-    join(projectRoot, 'config', 'projects.json');
+  const databaseUrl = process.env.DATABASE_URL;
 
-  if (!existsSync(registryPath)) {
+  if (!databaseUrl) {
     throw new Error(
-      `Project registry not found at ${registryPath}. Set MEMORY_POSTGRES_PROJECT_REGISTRY or create config/projects.json`
+      'DATABASE_URL environment variable is not set. ' +
+        'Set DATABASE_URL to a PostgreSQL connection string like: ' +
+        'postgresql://user:password@host:port/database'
     );
   }
 
-  let registry: ProjectRegistry;
-  try {
-    const content = readFileSync(registryPath, 'utf8');
-    registry = JSON.parse(content);
-  } catch (err) {
-    if (err instanceof SyntaxError) {
-      throw new Error(
-        `Failed to parse project registry at ${registryPath}: ${err.message}. Please ensure the file contains valid JSON.`
-      );
-    }
-    throw err;
-  }
-
-  const projectId = process.env.MEMORY_ACTIVE_PROJECT?.trim() || 'local';
-  const config = registry[projectId];
-
-  if (!config?.databaseUrl) {
-    const projects = Object.keys(registry);
+  if (!databaseUrl.startsWith('postgres://') && !databaseUrl.startsWith('postgresql://')) {
     throw new Error(
-      `Project "${projectId}" not found in registry (available: ${projects.join(', ')}). Update MEMORY_ACTIVE_PROJECT or config/projects.json`
+      'DATABASE_URL must be a PostgreSQL connection string (postgres:// or postgresql://)'
     );
   }
 
-  return config.databaseUrl;
+  return databaseUrl;
 }
 
 /**
@@ -522,15 +502,15 @@ main().catch((err) => {
       console.error('   Please ensure PostgreSQL is installed and running.');
     } else if (err.message.includes('authentication failed') || err.message.includes('password')) {
       console.error('\n💡 Hint: Authentication failed.');
-      console.error('   Check username and password in config/projects.json');
+      console.error('   Check username and password in DATABASE_URL environment variable');
     } else if (err.message.includes('vector')) {
       console.error('\n💡 Hint: pgvector extension may not be installed.');
       console.error(
         '   Install it according to: https://github.com/pgvector/pgvector#installation'
       );
-    } else if (err.message.includes('Project registry not found')) {
-      console.error('\n💡 Hint: Configuration file missing.');
-      console.error('   Create config/projects.json or set MEMORY_POSTGRES_PROJECT_REGISTRY');
+    } else if (err.message.includes('DATABASE_URL')) {
+      console.error('\n💡 Hint: DATABASE_URL environment variable not set.');
+      console.error('   Set DATABASE_URL to a PostgreSQL connection string');
     }
   } else {
     console.error(err);

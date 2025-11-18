@@ -5,7 +5,7 @@
  * configuration, database connectivity, and schema integrity.
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
 import pg from 'pg';
 import { loadEmbeddingConfig } from '../config/embedding.js';
 
@@ -65,19 +65,30 @@ export function checkEnv(projectRoot: string): HealthCheckResult[] {
     results.push(ok('env:file', '.env file', 'Found'));
   }
 
-  // Check active project
-  const activeProject = process.env.MEMORY_ACTIVE_PROJECT;
-  if (!activeProject) {
+  // Check DATABASE_URL
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
     results.push(
-      warn(
-        'env:active-project',
-        'MEMORY_ACTIVE_PROJECT',
-        'Not set (defaulting to "local")',
-        'Set MEMORY_ACTIVE_PROJECT to specify which project to use'
+      error(
+        'env:database-url',
+        'DATABASE_URL',
+        'Not set',
+        'Set DATABASE_URL to a PostgreSQL connection string (postgresql://user:pass@host:port/database)'
+      )
+    );
+  } else if (!databaseUrl.startsWith('postgres://') && !databaseUrl.startsWith('postgresql://')) {
+    results.push(
+      error(
+        'env:database-url',
+        'DATABASE_URL',
+        'Invalid protocol',
+        'DATABASE_URL must start with postgres:// or postgresql://'
       )
     );
   } else {
-    results.push(ok('env:active-project', 'MEMORY_ACTIVE_PROJECT', activeProject));
+    // Censor password for display
+    const censoredUrl = censorPassword(databaseUrl);
+    results.push(ok('env:database-url', 'DATABASE_URL', censoredUrl));
   }
 
   // Check OpenAI API key
@@ -117,78 +128,6 @@ export function checkEnv(projectRoot: string): HealthCheckResult[] {
 }
 
 /**
- * Validate projects.json structure
- */
-export function checkProjectsConfig(
-  configPath: string
-): HealthCheckResult & { config?: Record<string, { databaseUrl: string }>; warnings?: string[] } {
-  // Check file existence
-  if (!existsSync(configPath)) {
-    return error(
-      'config:projects-json',
-      'config/projects.json',
-      'File not found',
-      'Create config/projects.json with { "local": { "databaseUrl": "postgresql://..." } }'
-    );
-  }
-
-  // Parse JSON
-  let config: unknown;
-  try {
-    const content = readFileSync(configPath, 'utf-8');
-    config = JSON.parse(content);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return error(
-      'config:projects-json',
-      'config/projects.json',
-      `Parse error: ${message}`,
-      'Fix JSON syntax (check for trailing commas, quotes)'
-    );
-  }
-
-  // Validate structure
-  if (typeof config !== 'object' || config === null || Array.isArray(config)) {
-    return error(
-      'config:projects-json',
-      'config/projects.json',
-      'Invalid structure',
-      'Must be an object mapping project IDs to { databaseUrl: string }'
-    );
-  }
-
-  const configObj = config as Record<string, unknown>;
-  const warnings: string[] = [];
-
-  for (const [projectId, projectConfig] of Object.entries(configObj)) {
-    if (
-      typeof projectConfig !== 'object' ||
-      projectConfig === null ||
-      !('databaseUrl' in projectConfig) ||
-      typeof projectConfig.databaseUrl !== 'string'
-    ) {
-      return error(
-        'config:projects-json',
-        'config/projects.json',
-        `Invalid project "${projectId}"`,
-        'Each project must have a "databaseUrl" string property'
-      );
-    }
-
-    const url = projectConfig.databaseUrl;
-    if (!url.startsWith('postgres://') && !url.startsWith('postgresql://')) {
-      warnings.push(`Project "${projectId}" has non-standard URL scheme`);
-    }
-  }
-
-  return {
-    ...ok('config:projects-json', 'config/projects.json', 'Valid'),
-    config: configObj as Record<string, { databaseUrl: string }>,
-    warnings,
-  };
-}
-
-/**
  * Safely censor password in database URL
  */
 function censorPassword(databaseUrl: string): string {
@@ -202,33 +141,6 @@ function censorPassword(databaseUrl: string): string {
     // Fallback to regex if URL parsing fails
     return databaseUrl.replace(/:[^:]*@/, ':****@');
   }
-}
-
-/**
- * Resolve active project and database URL
- */
-export function resolveProjectConfig(
-  config: Record<string, { databaseUrl: string }>,
-  projectId: string
-): HealthCheckResult & { databaseUrl?: string } {
-  const projectConfig = config[projectId];
-
-  if (!projectConfig || !projectConfig.databaseUrl) {
-    return error(
-      'config:active-project',
-      'Active project',
-      `Project "${projectId}" not found in config`,
-      `Add an entry for "${projectId}" to config/projects.json or change MEMORY_ACTIVE_PROJECT`
-    );
-  }
-
-  // Censor password for display
-  const censoredUrl = censorPassword(projectConfig.databaseUrl);
-
-  return {
-    ...ok('config:active-project', 'Active project', `Using "${projectId}" → ${censoredUrl}`),
-    databaseUrl: projectConfig.databaseUrl,
-  };
 }
 
 /**
@@ -452,51 +364,29 @@ export async function checkEmbeddingColumn(client: pg.Client): Promise<HealthChe
 /**
  * Run all health checks
  */
-export async function runHealthChecks(
-  projectRoot: string,
-  configPath: string
-): Promise<HealthCheckResult[]> {
+export async function runHealthChecks(projectRoot: string): Promise<HealthCheckResult[]> {
   const results: HealthCheckResult[] = [];
 
   // Environment checks
   results.push(...checkEnv(projectRoot));
 
-  // Config file checks
-  const configCheck = checkProjectsConfig(configPath);
-  results.push(configCheck);
+  // Get DATABASE_URL from environment
+  const databaseUrl = process.env.DATABASE_URL;
 
-  // Add any URL scheme warnings
-  if (configCheck.warnings && configCheck.warnings.length > 0) {
-    for (const warning of configCheck.warnings) {
-      results.push(
-        warn(
-          'config:url-scheme',
-          'Database URL scheme',
-          warning,
-          'Database URL should start with postgres:// or postgresql://'
-        )
-      );
-    }
-  }
-
-  if (configCheck.status === 'error' || !configCheck.config) {
-    // Can't proceed without valid config
+  if (!databaseUrl) {
+    // Can't proceed without database URL - error already added by checkEnv
     return results;
   }
 
-  // Resolve active project
-  const projectId = process.env.MEMORY_ACTIVE_PROJECT || 'local';
-  const projectCheck = resolveProjectConfig(configCheck.config, projectId);
-  results.push(projectCheck);
-
-  if (projectCheck.status === 'error' || !projectCheck.databaseUrl) {
-    // Can't proceed without valid database URL
+  // Validate URL format
+  if (!databaseUrl.startsWith('postgres://') && !databaseUrl.startsWith('postgresql://')) {
+    // Error already added by checkEnv
     return results;
   }
 
   // Database checks
   const client = new pg.Client({
-    connectionString: projectCheck.databaseUrl,
+    connectionString: databaseUrl,
   });
 
   try {

@@ -1,7 +1,6 @@
 import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { config } from 'dotenv';
-import { loadBackendConfig } from '../src/config/backend.js';
 import { TestServerHarness } from './helpers/TestServerHarness.js';
 import { FakeEmbeddingService } from './helpers/FakeEmbeddingService.js';
 import { FakeLLMClient } from './helpers/FakeLLMClient.js';
@@ -17,9 +16,11 @@ describe('Memorize Tools Integration Tests', () => {
   const testIndexPrefix = 'mem-test-';
 
   before(async () => {
-    // Load database URL from backend config (projects.json)
-    const backendConfig = loadBackendConfig();
-    const databaseUrl = backendConfig.activeProject.databaseUrl;
+    // Get database URL from environment
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error('DATABASE_URL not set in test environment');
+    }
 
     // Create harness with fake embedding service for DB-level tests
     harness = new TestServerHarness(databaseUrl, testProjectId, {

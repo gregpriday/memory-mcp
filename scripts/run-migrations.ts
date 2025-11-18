@@ -23,16 +23,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const projectRoot = join(__dirname, '..');
 
-// Load config
-const configPath = join(projectRoot, 'config', 'projects.json');
-const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-
-// Get database URL from config (default to 'local' project)
-const projectId = process.env.MEMORY_ACTIVE_PROJECT || 'local';
-const databaseUrl = config[projectId]?.databaseUrl;
+// Get database URL from environment
+const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
-  console.error(`❌ No database URL found for project "${projectId}" in config/projects.json`);
+  console.error('❌ DATABASE_URL environment variable is not set');
+  console.error('   Set DATABASE_URL to a PostgreSQL connection string like:');
+  console.error('   postgresql://user:password@host:port/database');
+  process.exit(1);
+}
+
+if (!databaseUrl.startsWith('postgres://') && !databaseUrl.startsWith('postgresql://')) {
+  console.error('❌ DATABASE_URL must be a PostgreSQL connection string');
+  console.error('   It should start with postgres:// or postgresql://');
   process.exit(1);
 }
 
@@ -239,7 +242,6 @@ async function main() {
   const command = args[0] || 'migrate';
 
   console.log(`🚀 Database Migration Runner`);
-  console.log(`   Project: ${projectId}`);
   console.log(`   Database: ${databaseUrl.replace(/:[^:]*@/, ':****@')}\n`); // Hide password
 
   const client = new Client({
