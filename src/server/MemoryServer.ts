@@ -1,7 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import { resolve } from 'path';
 
 import { loadBackendConfig } from '../config/backend.js';
 import { loadEmbeddingConfig } from '../config/embedding.js';
@@ -13,9 +12,6 @@ import { MemoryController } from '../memory/MemoryController.js';
 import { PromptManager } from '../llm/PromptManager.js';
 import { LLMClient } from '../llm/LLMClient.js';
 import { MemoryAgent } from '../llm/MemoryAgent.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 function getEnvInt(name: string, fallback: number): number {
   const value = process.env[name];
@@ -87,7 +83,7 @@ export function createMemoryServer(config?: {
   const indexResolver = new IndexResolver(defaultIndex);
   const maxFileBytes = getEnvInt('MEMORY_MAX_FILE_BYTES', 2 * 1024 * 1024);
   const fileLoader = new ProjectFileLoader(projectRoot, maxFileBytes);
-  const promptsDir = join(__dirname, '../../prompts');
+  const promptsDir = resolve(projectRoot, 'prompts');
   const promptManager = new PromptManager(promptsDir);
   const llmClient = new LLMClient(openaiApiKey);
 

@@ -1,3 +1,4 @@
+import { resolve } from 'path';
 import { Pool } from 'pg';
 import { MemoryController } from '../../src/memory/MemoryController.js';
 import { MemoryAgent } from '../../src/llm/MemoryAgent.js';
@@ -67,8 +68,8 @@ export class TestServerHarness {
       options?.llmClient ??
       new LLMClient(process.env.OPENAI_API_KEY ?? 'test-key-not-used-for-index-operations');
 
-    // Create prompt manager (point to prompts directory)
-    const promptsDir = new URL('../../prompts', import.meta.url).pathname;
+    // Create prompt manager (Jest runs from project root, so process.cwd() works)
+    const promptsDir = resolve(process.cwd(), 'prompts');
     const promptManager = new PromptManager(promptsDir);
 
     // Create index resolver
