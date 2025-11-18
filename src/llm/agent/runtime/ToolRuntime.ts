@@ -11,6 +11,13 @@ interface ToolRuntimeConfig {
   maxSearchIterations?: number;
 }
 
+export interface ToolLoopLlmOptions {
+  model?: string;
+  maxTokens?: number;
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
+  verbosity?: 'low' | 'medium' | 'high';
+}
+
 /**
  * ToolRuntime - Internal Tool System for Memory Agent
  *
@@ -450,7 +457,7 @@ export class ToolRuntime {
             // If memoryType exists at top level, validate and move to metadata
             if (sanitizedMemory.memoryType && typeof sanitizedMemory.memoryType === 'string') {
               const typedMemoryType = sanitizedMemory.memoryType as MemoryType;
-              const { memoryType, ...rest } = sanitizedMemory;
+              const { memoryType: _memoryType, ...rest } = sanitizedMemory;
 
               // Only persist valid memory types
               if (VALID_MEMORY_TYPES.has(typedMemoryType)) {
@@ -568,7 +575,8 @@ export class ToolRuntime {
   async runToolLoop(
     systemPrompt: string,
     userMessage: string,
-    context: RequestContext
+    context: RequestContext,
+    llmOptions: ToolLoopLlmOptions = {}
   ): Promise<string> {
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -577,14 +585,25 @@ export class ToolRuntime {
 
     const tools = this.getInternalTools(context.operationMode);
     let iterations = 0;
+    let previousResponseId: string | undefined;
+    const resolvedMaxTokens = llmOptions.maxTokens ?? 16384;
+    const resolvedReasoningEffort =
+      llmOptions.reasoningEffort ??
+      (context.operationMode === 'refinement-planning' ? 'medium' : 'none');
 
     while (iterations < this.maxToolIterations) {
       iterations++;
 
       const response = await this.llm.chatWithTools(messages, tools, {
-        maxTokens: 16384, // Cap agent's JSON response (memories + metadata + reasoning)
+        model: llmOptions.model,
+        maxTokens: resolvedMaxTokens, // Cap agent's JSON response (memories + metadata + reasoning)
+        previousResponseId,
+        reasoningEffort: resolvedReasoningEffort,
+        verbosity: llmOptions.verbosity,
         jsonMode: true, // Enforce JSON mode for structured final responses
       });
+
+      previousResponseId = response.responseId;
 
       // Check for truncation or content filtering BEFORE processing response
       if (response.finishReason === 'length') {
@@ -678,7 +697,9 @@ export class ToolRuntime {
             try {
               const parsedResult = JSON.parse(result);
               if (Array.isArray(parsedResult)) {
-                const resultIds = parsedResult.map((r: any) => r?.id).filter(Boolean);
+                const resultIds = parsedResult
+                  .map((r: unknown) => (r as { id?: string })?.id)
+                  .filter(Boolean);
                 logEntry.diagnostics = {
                   searchResultIds: resultIds,
                   searchResultCount: parsedResult.length,
@@ -696,7 +717,7 @@ export class ToolRuntime {
               // Result not parseable, skip ID extraction
             }
           }
-        } catch (err) {
+        } catch {
           // Silently skip diagnostic extraction on parse errors
         }
 

@@ -1,8 +1,10 @@
 import OpenAI from 'openai';
 import type {
-  ChatCompletionMessageParam,
-  ChatCompletionTool,
-} from 'openai/resources/chat/completions';
+  ResponseCreateParamsNonStreaming,
+  Response,
+  ResponseInput,
+  ResponseInputItem,
+} from 'openai/resources/responses/responses';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -29,6 +31,7 @@ export interface ToolCall {
 }
 
 export interface LLMResponse {
+  responseId: string;
   content: string | null;
   toolCalls?: ToolCall[];
   finishReason: string;
@@ -50,109 +53,136 @@ export class LLMClient {
   }
 
   /**
-   * Convert our ChatMessage format to OpenAI format
+   * Convert our ChatMessage format to Responses API input format
    */
-  private toOpenAIMessages(messages: ChatMessage[]): ChatCompletionMessageParam[] {
-    return messages.map((msg) => {
-      if (msg.role === 'tool') {
-        return {
-          role: 'tool',
-          content: msg.content || '',
-          tool_call_id: msg.tool_call_id!,
-        };
+  private toResponseInput(messages: ChatMessage[]): ResponseInput {
+    const input: ResponseInput = [];
+
+    for (const message of messages) {
+      if (message.role === 'tool') {
+        if (!message.tool_call_id) {
+          throw new Error('Tool messages must include tool_call_id');
+        }
+        input.push({
+          type: 'function_call_output',
+          call_id: message.tool_call_id,
+          output: message.content ?? '',
+        });
+        continue;
       }
-      if (msg.role === 'assistant' && msg.tool_calls) {
-        return {
-          role: 'assistant',
-          content: msg.content,
-          tool_calls: msg.tool_calls.map((tc) => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: {
-              name: tc.name,
-              arguments: tc.arguments,
-            },
-          })),
-        } as ChatCompletionMessageParam;
+
+      input.push({
+        role: message.role,
+        content: message.content ?? '',
+      } as ResponseInputItem);
+
+      if (message.role === 'assistant' && message.tool_calls) {
+        for (const toolCall of message.tool_calls) {
+          input.push({
+            type: 'function_call',
+            id: toolCall.id,
+            call_id: toolCall.id,
+            name: toolCall.name,
+            arguments: toolCall.arguments,
+          });
+        }
       }
-      return {
-        role: msg.role,
-        content: msg.content,
-        ...(msg.name && { name: msg.name }),
-      } as ChatCompletionMessageParam;
-    });
+    }
+
+    return input;
   }
 
   /**
-   * Convert our ToolDef format to OpenAI ChatCompletionTool format
+   * Convert our ToolDef format to Responses API tool format
    */
-  private toOpenAITools(tools: ToolDef[]): ChatCompletionTool[] {
+  private toResponseTools(tools: ToolDef[]): ResponseCreateParamsNonStreaming['tools'] {
     return tools.map((tool) => ({
       type: 'function' as const,
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters,
-      },
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+      strict: true,
     }));
   }
 
   /**
-   * Chat completion with tool calling support
+   * Extract content and tool calls from Responses API output
+   */
+  private extractResponseContent(response: Response): {
+    content: string | null;
+    toolCalls?: ToolCall[];
+  } {
+    const toolCalls: ToolCall[] = [];
+
+    for (const item of response.output) {
+      if (item.type === 'function_call') {
+        toolCalls.push({
+          id: item.id ?? item.call_id,
+          name: item.name,
+          arguments: item.arguments,
+        });
+      }
+    }
+
+    return {
+      content: response.output_text?.length ? response.output_text : null,
+      toolCalls: toolCalls.length ? toolCalls : undefined,
+    };
+  }
+
+  /**
+   * Chat completion with tool calling support using Responses API
    */
   async chatWithTools(
     messages: ChatMessage[],
     tools: ToolDef[],
     options: {
       model?: string;
-      temperature?: number;
       maxTokens?: number;
+      previousResponseId?: string;
+      reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
+      verbosity?: 'low' | 'medium' | 'high';
       jsonMode?: boolean;
     } = {}
   ): Promise<LLMResponse> {
-    const model = options.model || this.defaultModel;
-    const maxTokens = options.maxTokens;
+    const model = options.model ?? this.defaultModel;
+    const reasoningEffort =
+      options.reasoningEffort ??
+      (process.env.MEMORY_MODEL_REASONING_EFFORT as
+        | 'none'
+        | 'low'
+        | 'medium'
+        | 'high'
+        | undefined) ??
+      'none';
+    const verbosity =
+      options.verbosity ??
+      (process.env.MEMORY_MODEL_VERBOSITY as 'low' | 'medium' | 'high' | undefined) ??
+      'medium';
 
-    // Only set temperature if explicitly provided, otherwise use model default
-    // Some models (like gpt-5-mini) only support their default temperature
-    const completionOptions: any = {
+    const requestBody: ResponseCreateParamsNonStreaming = {
       model,
-      messages: this.toOpenAIMessages(messages),
-      tools: this.toOpenAITools(tools),
+      tools: tools.length ? this.toResponseTools(tools) : undefined,
+      reasoning: { effort: reasoningEffort },
+      text: {
+        verbosity: verbosity,
+        ...(options.jsonMode && { format: { type: 'json_object' } }),
+      },
+      ...(options.maxTokens && { max_output_tokens: options.maxTokens }),
+      ...(options.previousResponseId
+        ? { previous_response_id: options.previousResponseId }
+        : { input: this.toResponseInput(messages) }),
     };
 
-    // GPT-5 models use max_completion_tokens instead of max_tokens
-    if (maxTokens) {
-      if (model.startsWith('gpt-5')) {
-        completionOptions.max_completion_tokens = maxTokens;
-      } else {
-        completionOptions.max_tokens = maxTokens;
-      }
-    }
-
-    if (options.temperature !== undefined) {
-      completionOptions.temperature = options.temperature;
-    }
-
-    // Enable JSON mode for structured responses
-    if (options.jsonMode) {
-      completionOptions.response_format = { type: 'json_object' };
-    }
-
     try {
-      const response = await this.openai.chat.completions.create(completionOptions);
-
-      const choice = response.choices[0];
-      const message = choice.message;
+      const response = await this.openai.responses.create(requestBody);
+      const parsed = this.extractResponseContent(response);
 
       return {
-        content: message.content,
-        toolCalls: message.tool_calls?.map((tc) => ({
-          id: tc.id,
-          name: (tc as any).function.name,
-          arguments: (tc as any).function.arguments,
-        })),
-        finishReason: choice.finish_reason,
+        responseId: response.id,
+        content: parsed.content,
+        toolCalls: parsed.toolCalls,
+        finishReason: response.incomplete_details?.reason ?? response.status ?? 'completed',
       };
     } catch (error) {
       console.error('LLM API error:', error);
@@ -161,47 +191,36 @@ export class LLMClient {
   }
 
   /**
-   * Simple chat without tool calling (useful for analysis tasks)
+   * Simple chat without tool calling (useful for analysis tasks) using Responses API
    */
   async simpleChat(
     systemPrompt: string,
     userContent: string,
     options: {
       model?: string;
-      temperature?: number;
       maxTokens?: number;
+      reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
+      verbosity?: 'low' | 'medium' | 'high';
     } = {}
   ): Promise<string> {
-    const model = options.model || this.defaultAnalysisModel;
-    const maxTokens = options.maxTokens;
+    const model = options.model ?? this.defaultAnalysisModel;
+    const reasoningEffort = options.reasoningEffort ?? 'none'; // Fast for analysis tasks
+    const verbosity = options.verbosity ?? 'low'; // Concise for analysis
 
-    // Only set temperature if explicitly provided, otherwise use model default
-    // Some models (like gpt-5-mini) only support their default temperature
-    const completionOptions: any = {
+    const requestBody: ResponseCreateParamsNonStreaming = {
       model,
-      messages: [
+      input: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
       ],
+      reasoning: { effort: reasoningEffort },
+      text: { verbosity: verbosity },
+      ...(options.maxTokens && { max_output_tokens: options.maxTokens }),
     };
 
-    // GPT-5 models use max_completion_tokens instead of max_tokens
-    if (maxTokens) {
-      if (model.startsWith('gpt-5')) {
-        completionOptions.max_completion_tokens = maxTokens;
-      } else {
-        completionOptions.max_tokens = maxTokens;
-      }
-    }
-
-    if (options.temperature !== undefined) {
-      completionOptions.temperature = options.temperature;
-    }
-
     try {
-      const response = await this.openai.chat.completions.create(completionOptions);
-
-      return response.choices[0].message.content || '';
+      const response = await this.openai.responses.create(requestBody);
+      return response.output_text || '';
     } catch (error) {
       console.error('LLM API error:', error);
       throw new Error(`LLM request failed: ${(error as Error).message}`);
@@ -224,7 +243,7 @@ export class LLMClient {
 
   /**
    * Expand a query into semantic variations for improved recall accuracy.
-   * Uses a cheap model (gpt-4o-mini) to generate alternative phrasings of the same query.
+   * Uses a fast model (gpt-5-mini) to generate alternative phrasings of the same query.
    *
    * @param query - The original user query to expand
    * @param count - Number of variations to generate (default: 2)
@@ -252,17 +271,20 @@ User: "What are the email rules?"
 Assistant: ["email style guide formatting preferences", "email communication template structure"]`;
 
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
+      const response = await this.openai.responses.create({
+        model: this.defaultAnalysisModel,
+        input: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: query },
         ],
-        response_format: { type: 'json_object' },
-        temperature: 0.7, // Allow some creativity for variation
+        reasoning: { effort: 'none' }, // Fast response for query expansion
+        text: {
+          verbosity: 'low', // Concise variations
+          format: { type: 'json_object' },
+        },
       });
 
-      const content = response.choices[0].message.content || '{"variations": []}';
+      const content = response.output_text || '{"variations": []}';
       const parsed = JSON.parse(content);
 
       // Handle both array and object responses
