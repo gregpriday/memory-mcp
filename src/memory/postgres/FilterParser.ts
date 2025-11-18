@@ -495,6 +495,12 @@ class SQLTranslator {
 
     // Special handling for importance: map string values to integers
     if (fieldName === 'importance' && typeof value.value === 'string') {
+      // Importance is an integer field, only equality is supported
+      if (operator === 'CONTAINS') {
+        throw new Error(
+          `CONTAINS operator only supported for array fields. Field ${fieldName} is ${type}`
+        );
+      }
       const importanceMap: Record<string, number> = {
         low: 0,
         medium: 1,
@@ -564,10 +570,12 @@ class SQLTranslator {
 
   /**
    * Sanitize JSONB key to prevent injection
-   * Allow only alphanumeric, underscore, and hyphen
+   * Allow only alphanumeric, underscore, and hyphen (but not starting/ending with hyphen)
    */
   private sanitizeJsonbKey(key: string): string {
-    if (!/^[a-zA-Z0-9_-]+$/.test(key)) {
+    // Must start with letter/digit/underscore, can contain hyphens in the middle,
+    // but cannot start or end with hyphen
+    if (!/^[a-zA-Z0-9_][a-zA-Z0-9_-]*[a-zA-Z0-9_]$/.test(key) && !/^[a-zA-Z0-9_]$/.test(key)) {
       throw new Error(
         `Invalid JSONB field name: ${key}. Only alphanumeric, underscore, and hyphen allowed.`
       );
