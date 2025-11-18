@@ -9,7 +9,12 @@ import { ProjectFileLoader } from '../../src/memory/ProjectFileLoader.js';
 import { EmbeddingService } from '../../src/llm/EmbeddingService.js';
 import { PoolManager } from '../../src/memory/PoolManager.js';
 import type { McpContent } from '../../src/memory/MemoryController.js';
-import type { CreateIndexResult, ListIndexesResult } from '../../src/memory/types.js';
+import type {
+  CreateIndexResult,
+  ListIndexesResult,
+  MemorizeToolArgs,
+  MemorizeResult,
+} from '../../src/memory/types.js';
 
 /**
  * Test harness for bootstrapping MemoryController and database connections.
@@ -22,7 +27,14 @@ export class TestServerHarness {
   public readonly projectId: string;
   private readonly databaseUrl: string;
 
-  constructor(databaseUrl: string, projectId: string) {
+  constructor(
+    databaseUrl: string,
+    projectId: string,
+    options?: {
+      embeddingService?: EmbeddingService;
+      llmClient?: LLMClient;
+    }
+  ) {
     this.databaseUrl = databaseUrl;
     if (!databaseUrl) {
       throw new Error(
@@ -34,21 +46,22 @@ export class TestServerHarness {
     this.projectId = projectId;
     this.pool = new Pool({ connectionString: databaseUrl });
 
-    // Create embedding service
-    const embeddingService = new EmbeddingService(
-      process.env.OPENAI_API_KEY ?? 'test-key-not-used-for-index-operations'
-    );
+    // Create or use injected embedding service
+    const embeddingService =
+      options?.embeddingService ??
+      new EmbeddingService(process.env.OPENAI_API_KEY ?? 'test-key-not-used-for-index-operations');
 
     // Create repository
     this.repository = new MemoryRepositoryPostgres(databaseUrl, projectId, embeddingService);
 
-    // Create LLM client (not used for create_index/list_indexes)
-    const llmClient = new LLMClient(
-      process.env.OPENAI_API_KEY ?? 'test-key-not-used-for-index-operations'
-    );
+    // Create or use injected LLM client
+    const llmClient =
+      options?.llmClient ??
+      new LLMClient(process.env.OPENAI_API_KEY ?? 'test-key-not-used-for-index-operations');
 
-    // Create prompt manager
-    const promptManager = new PromptManager();
+    // Create prompt manager (point to prompts directory)
+    const promptsDir = new URL('../../prompts', import.meta.url).pathname;
+    const promptManager = new PromptManager(promptsDir);
 
     // Create index resolver
     const indexResolver = new IndexResolver('default');
@@ -144,6 +157,85 @@ export class TestServerHarness {
       this.projectId,
       `${namePrefix}%`,
     ]);
+  }
+
+  /**
+   * Call memorize tool and return parsed result.
+   */
+  async callMemorize(args: MemorizeToolArgs): Promise<MemorizeResult> {
+    const mcpResponse = await this.controller.handleMemorizeTool(args);
+    return this.parseJsonResponse<MemorizeResult>(mcpResponse);
+  }
+
+  /**
+   * Get a memory row from the database including all fields.
+   */
+  async getMemoryRow(memoryId: string): Promise<{
+    id: string;
+    content: string;
+    embedding: number[];
+    source: string;
+    metadata: Record<string, unknown>;
+    initial_priority: number;
+    current_priority: number;
+    created_at: Date;
+    updated_at: Date;
+  } | null> {
+    const result = await this.pool.query(
+      `SELECT
+        id,
+        content,
+        embedding,
+        source,
+        metadata,
+        initial_priority,
+        current_priority,
+        created_at,
+        updated_at
+      FROM memories
+      WHERE project = $1 AND id = $2`,
+      [this.projectId, memoryId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return result.rows[0];
+  }
+
+  /**
+   * Get embedding dimensions for a memory using pgvector's vector_dims function.
+   */
+  async getEmbeddingDimensions(memoryId: string): Promise<number | null> {
+    const result = await this.pool.query(
+      `SELECT vector_dims(embedding) AS dims
+      FROM memories
+      WHERE project = $1 AND id = $2`,
+      [this.projectId, memoryId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return result.rows[0].dims;
+  }
+
+  /**
+   * Clean up test memories.
+   * Deletes all memories associated with test indexes (by name prefix).
+   */
+  async cleanupTestMemories(indexNamePrefix: string): Promise<void> {
+    await this.pool.query(
+      `DELETE FROM memories
+      WHERE project = $1
+      AND index_id IN (
+        SELECT id FROM memory_indexes
+        WHERE project = $1 AND name LIKE $2
+      )`,
+      [this.projectId, `${indexNamePrefix}%`]
+    );
   }
 
   /**

@@ -29,8 +29,55 @@ export interface McpContent {
 }
 
 /**
- * MemoryController
- * Orchestrates memory operations and coordinates between MCP tools and the agent
+ * MemoryController - MCP Tool Orchestration Layer
+ *
+ * Orchestrates high-level memory operations by coordinating between MCP tools,
+ * the memory agent, and backend storage. Acts as the bridge between the MCP
+ * server layer and the agent/repository layers.
+ *
+ * **Responsibilities:**
+ * - **Index Resolution**: Validates and resolves index names via IndexResolver
+ * - **Agent Orchestration**: Delegates operations to MemoryAgent with appropriate mode
+ * - **File Access Control**: Manages project file reading permissions via ProjectFileLoader
+ * - **Response Formatting**: Converts agent results to MCP content format
+ *
+ * **Supported Operations:**
+ * - `memorize`: Store memories from text or files using agent
+ * - `recall`: Search and retrieve memories semantically
+ * - `forget`: Delete memories by criteria (with dry-run support)
+ * - `refine_memories`: Analyze and consolidate memories
+ * - `create_index`: Create new memory index
+ * - `list_indexes`: List all available indexes
+ * - `scan_memories`: Get statistics about stored memories
+ *
+ * @remarks
+ * This class implements security boundaries:
+ * - Index names are validated against project configuration
+ * - File paths are restricted to project directory
+ * - Agent operations use sandboxed tool runtime
+ *
+ * @example
+ * ```typescript
+ * const controller = new MemoryController(
+ *   indexResolver,
+ *   memoryAgent,
+ *   projectFileLoader
+ * );
+ *
+ * // Store memories
+ * const result = await controller.memorize({
+ *   input: 'User prefers dark mode',
+ *   index: 'preferences'
+ * });
+ *
+ * // Search memories
+ * const recall = await controller.recall({
+ *   query: 'UI preferences',
+ *   index: 'preferences'
+ * });
+ * ```
+ *
+ * @public
  */
 export class MemoryController {
   constructor(
