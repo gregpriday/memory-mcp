@@ -109,7 +109,7 @@ describe('getRecencyScore', () => {
     expect(score).toBe(0);
   });
 
-  it('should use dynamics.lastAccessedAt when present instead of content.timestamp', () => {
+  it('should use dynamics.valid_at when present instead of content.timestamp', () => {
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
@@ -122,7 +122,7 @@ describe('getRecencyScore', () => {
       metadata: {
         index: 'test',
         dynamics: {
-          lastAccessedAt: tenDaysAgo.toISOString(), // But accessed 10 days ago
+          valid_at: tenDaysAgo.toISOString(), // But valid 10 days ago (narrative time)
           initialPriority: 0.5,
           currentPriority: 0.5,
           createdAt: thirtyDaysAgo.toISOString(),
@@ -132,12 +132,12 @@ describe('getRecencyScore', () => {
     });
 
     const score = getRecencyScore(memory, now);
-    // Should be based on 10-day decay, not 30-day
+    // Should be based on 10-day decay (from valid_at), not 30-day (from content.timestamp)
     const expectedForTenDays = Math.exp((-Math.log(2) * 10) / 30);
     expect(score).toBeCloseTo(expectedForTenDays, 3);
   });
 
-  it('should fall back to content.timestamp when lastAccessedAt is invalid', () => {
+  it('should fall back to content.timestamp when valid_at is invalid', () => {
     const now = new Date();
     const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
 
@@ -149,7 +149,7 @@ describe('getRecencyScore', () => {
       metadata: {
         index: 'test',
         dynamics: {
-          lastAccessedAt: 'invalid-timestamp', // Invalid
+          valid_at: 'invalid-timestamp', // Invalid
           initialPriority: 0.5,
           currentPriority: 0.5,
           createdAt: tenDaysAgo.toISOString(),

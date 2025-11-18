@@ -37,9 +37,11 @@ import { MemoryRecord, MemoryDynamics, Importance, EmotionInfo } from './types.j
 /**
  * Calculate recency score using exponential decay with 30-day half-life.
  *
- * Recency measures how "fresh" a memory is. Uses the most recent of:
- * - Last access time (if the memory has been recalled before)
- * - Creation time (for memories never accessed)
+ * Recency measures how "fresh" a memory is. Uses narrative time (valid_at) to enable
+ * temporally coherent consolidation of backdated memories. Falls back to:
+ * - valid_at (narrative time - when this fact was "true" in-world)
+ * - createdAt (for memories without valid_at)
+ * - content.timestamp (legacy fallback)
  *
  * The exponential decay formula ensures natural forgetting over time:
  * - 0 days old: score ≈ 1.0 (100% fresh)
@@ -47,13 +49,14 @@ import { MemoryRecord, MemoryDynamics, Importance, EmotionInfo } from './types.j
  * - 60 days old: score = 0.25 (25% fresh)
  * - 90 days old: score = 0.125 (12.5% fresh)
  *
- * @param memory Memory record to score (uses lastAccessedAt or creation timestamp)
+ * @param memory Memory record to score (uses valid_at, createdAt, or content.timestamp)
  * @param now Current date/time for age calculation
  * @returns Recency score in [0, 1], where 1.0 is brand new and 0.0 is infinitely old
  *
  * @remarks
  * Formula: 2^(-ageDays / 30)
  * - The 30-day half-life mimics short-term to medium-term memory decay
+ * - Uses valid_at (narrative time) instead of recorded_at to support backdated consolidation
  * - Guards against invalid timestamps by returning 0
  *
  * @example
@@ -61,7 +64,11 @@ import { MemoryRecord, MemoryDynamics, Importance, EmotionInfo } from './types.j
  * const now = new Date();
  * const memory = {
  *   content: { timestamp: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() },
- *   metadata: {}
+ *   metadata: {
+ *     dynamics: {
+ *       valid_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+ *     }
+ *   }
  * };
  * const score = getRecencyScore(memory, now);
  * // Returns: ~0.5 (30 days old = half-life)
@@ -76,14 +83,19 @@ export function getRecencyScore(
   const dynamics = memory.metadata?.dynamics;
   const nowMs = now.getTime();
 
-  // Try lastAccessedAt first, fall back to content.timestamp if invalid
+  // Priority: valid_at (narrative time) > createdAt > content.timestamp (legacy)
+  // This enables backdated memories to have correct priority decay
   let referenceMs: number;
-  if (dynamics?.lastAccessedAt) {
-    referenceMs = new Date(dynamics.lastAccessedAt).getTime();
+  if (dynamics?.valid_at) {
+    referenceMs = new Date(dynamics.valid_at).getTime();
     if (!Number.isFinite(referenceMs)) {
-      // lastAccessedAt is invalid, fall back to content.timestamp
-      referenceMs = new Date(memory.content.timestamp).getTime();
+      // valid_at is invalid, fall back to createdAt or content.timestamp
+      referenceMs = dynamics?.createdAt
+        ? new Date(dynamics.createdAt).getTime()
+        : new Date(memory.content.timestamp).getTime();
     }
+  } else if (dynamics?.createdAt) {
+    referenceMs = new Date(dynamics.createdAt).getTime();
   } else {
     referenceMs = new Date(memory.content.timestamp).getTime();
   }

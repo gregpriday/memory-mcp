@@ -47,6 +47,9 @@ interface MemoryRow {
   kind?: string | null;
   derived_from_ids?: string[] | null;
   superseded_by_id?: string | null;
+  valid_at?: Date | null;
+  recorded_at?: Date | null;
+  time_confidence?: number | null;
 }
 
 /**
@@ -203,6 +206,9 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       maxAccessCount: row.max_access_count || 0,
       stability: (row.stability as 'tentative' | 'stable' | 'canonical') || 'tentative',
       sleepCycles: row.sleep_cycles || 0,
+      valid_at: row.valid_at?.toISOString(),
+      recorded_at: row.recorded_at?.toISOString(),
+      time_confidence: row.time_confidence || undefined,
     };
 
     return metadata;
@@ -405,12 +411,15 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
         kind,
         derivedFromIds,
         supersededById,
-        metadataJson
+        metadataJson,
+        dynamics.valid_at || null,
+        dynamics.recorded_at || null,
+        dynamics.time_confidence || null
       );
     }
 
     // Build bulk INSERT with ON CONFLICT
-    const cols = 23; // Number of columns per row
+    const cols = 26; // Number of columns per row (added valid_at, recorded_at, time_confidence)
     const placeholders = memories
       .map((_, i) => {
         const start = i * cols + 1;
@@ -425,7 +434,8 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
         memory_type, topic, importance, tags, source, source_path,
         initial_priority, current_priority, created_at, last_accessed_at,
         access_count, max_access_count, stability, sleep_cycles,
-        kind, derived_from_ids, superseded_by_id, metadata
+        kind, derived_from_ids, superseded_by_id, metadata,
+        valid_at, recorded_at, time_confidence
       )
       VALUES ${placeholders}
       ON CONFLICT (id) DO UPDATE SET
@@ -447,6 +457,9 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
         derived_from_ids = EXCLUDED.derived_from_ids,
         superseded_by_id = EXCLUDED.superseded_by_id,
         metadata = EXCLUDED.metadata,
+        valid_at = EXCLUDED.valid_at,
+        recorded_at = EXCLUDED.recorded_at,
+        time_confidence = EXCLUDED.time_confidence,
         updated_at = NOW()
       RETURNING id
     `;
@@ -485,6 +498,10 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       type: string;
       confidence: number;
       metadata: Record<string, unknown>;
+      valid_at?: string | null;
+      recorded_at?: string | null;
+      temporal_ok?: boolean | null;
+      temporal_reason?: string | null;
     }> = [];
 
     for (let i = 0; i < memories.length; i++) {
@@ -503,6 +520,10 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
             type: rel.type,
             confidence: rel.weight ?? 1.0,
             metadata: {},
+            valid_at: rel.valid_at ?? null,
+            recorded_at: rel.recorded_at ?? null,
+            temporal_ok: rel.temporal_ok ?? null,
+            temporal_reason: rel.temporal_reason ?? null,
           });
         }
       }
@@ -533,9 +554,9 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
         for (let i = 0; i < relationshipsToInsert.length; i++) {
           const rel = relationshipsToInsert[i];
-          const offset = i * 7 + 1;
+          const offset = i * 11 + 1;
           placeholders.push(
-            `($${offset}, $${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`
+            `($${offset}, $${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10})`
           );
           values.push(
             this.projectId,
@@ -544,17 +565,25 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
             rel.targetId,
             rel.type,
             rel.confidence,
-            JSON.stringify(rel.metadata)
+            JSON.stringify(rel.metadata),
+            rel.valid_at,
+            rel.recorded_at,
+            rel.temporal_ok,
+            rel.temporal_reason
           );
         }
 
         const insertQuery = `
-          INSERT INTO memory_relationships (project, index_id, source_id, target_id, relationship_type, confidence, metadata)
+          INSERT INTO memory_relationships (project, index_id, source_id, target_id, relationship_type, confidence, metadata, valid_at, recorded_at, temporal_ok, temporal_reason)
           VALUES ${placeholders.join(', ')}
           ON CONFLICT (source_id, target_id, relationship_type, index_id)
           DO UPDATE SET
             confidence = EXCLUDED.confidence,
-            metadata = EXCLUDED.metadata
+            metadata = EXCLUDED.metadata,
+            valid_at = EXCLUDED.valid_at,
+            recorded_at = EXCLUDED.recorded_at,
+            temporal_ok = EXCLUDED.temporal_ok,
+            temporal_reason = EXCLUDED.temporal_reason
         `;
 
         await client.query(insertQuery, values);
@@ -610,8 +639,12 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       target_id: string;
       relationship_type: string;
       confidence: number;
+      valid_at?: string | null;
+      recorded_at?: string | null;
+      temporal_ok?: boolean | null;
+      temporal_reason?: string | null;
     }>(
-      `SELECT source_id, target_id, relationship_type, confidence
+      `SELECT source_id, target_id, relationship_type, confidence, valid_at, recorded_at, temporal_ok, temporal_reason
        FROM memory_relationships
        WHERE project = $1 AND index_id = $2 AND (source_id = ANY($3::text[]) OR target_id = ANY($3::text[]))`,
       [this.projectId, indexId, memoryIds]
@@ -631,6 +664,10 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
           targetId: row.target_id,
           type: row.relationship_type as Relationship['type'],
           weight: row.confidence,
+          valid_at: row.valid_at || undefined,
+          recorded_at: row.recorded_at || undefined,
+          temporal_ok: row.temporal_ok ?? undefined,
+          temporal_reason: row.temporal_reason || undefined,
         };
         outgoingMap.get(row.source_id)!.push(relationship);
 
@@ -1002,6 +1039,9 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
           kind,
           derived_from_ids,
           superseded_by_id,
+          valid_at,
+          recorded_at,
+          time_confidence,
           1 - (embedding <=> $1::vector) AS semantic_score
         FROM memories
         WHERE index_id = $2
@@ -1196,7 +1236,8 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
               memory_type, topic, importance, tags, source, source_path, channel,
               initial_priority, current_priority, updated_at, last_accessed_at,
               access_count, max_access_count, stability, sleep_cycles,
-              kind, derived_from_ids, superseded_by_id
+              kind, derived_from_ids, superseded_by_id,
+              valid_at, recorded_at, time_confidence
        FROM memories
        WHERE index_id = $1
          AND project = $2

@@ -37,7 +37,11 @@ export type RelationshipType =
   | 'causes' // A causes B (episodic → episodic) - Causal relationship where A leads to B
   | 'similar_to' // A is similar to B (episodic → episodic) - Semantic or contextual similarity without direct relationship
   | 'historical_version_of' // A is older version of B (episodic → episodic) - A was superseded or updated to become B
-  | 'derived_from'; // A was derived from B (pattern/belief → episodics/patterns) - A is computed or abstracted from B
+  | 'derived_from' // A was derived from B (pattern/belief → episodics/patterns) - A is computed or abstracted from B
+  | 'leads_to' // A leads to B (summary → summary) - Temporal progression where A precedes B chronologically
+  | 'informs' // A informs B (memory → memory) - Causal influence where A provides context for B
+  | 'consolidates' // A consolidates B (summary → source) - A is a consolidation that includes B as source material
+  | 'evolves_into'; // A evolves into B (memory → memory) - Conceptual evolution where A transforms into B over time
 
 /**
  * Represents a directed edge in the memory graph.
@@ -52,6 +56,18 @@ export interface Relationship {
 
   /** Optional strength indicator (0.0–1.0) for relationship confidence */
   weight?: number;
+
+  /** Narrative time: when this relationship became true in-world (ISO 8601) */
+  valid_at?: string;
+
+  /** System time: when we recorded this relationship (ISO 8601) */
+  recorded_at?: string;
+
+  /** Whether temporal constraints were satisfied when creating this relationship */
+  temporal_ok?: boolean;
+
+  /** Explanation of temporal validation outcome (warnings, clamping applied, etc.) */
+  temporal_reason?: string;
 }
 
 /**
@@ -120,6 +136,26 @@ export interface MemoryDynamics {
 
   /** Number of refinement passes that have processed this memory */
   sleepCycles?: number;
+
+  /**
+   * Narrative time: when this fact was "true" in-world (ISO 8601 date or datetime).
+   * Used for priority decay instead of createdAt to enable temporally coherent consolidation.
+   * Defaults to createdAt for backward compatibility.
+   */
+  valid_at?: string;
+
+  /**
+   * System time: when we ingested/created this record (ISO 8601 datetime).
+   * Used for auditability and distinguishing "when it was true" from "when we recorded it".
+   * Defaults to createdAt for backward compatibility.
+   */
+  recorded_at?: string;
+
+  /**
+   * Confidence level for the valid_at timestamp (0.0-1.0).
+   * 1.0 = exact timestamp known, 0.5 = estimated/inferred, 0.0 = completely uncertain.
+   */
+  time_confidence?: number;
 }
 
 export interface MemoryMetadata {
@@ -159,6 +195,33 @@ export interface MemoryMetadata {
 
   /** ID of a newer memory that supersedes this one */
   supersededById?: string;
+
+  /**
+   * Consolidation metadata for temporal coherence and idempotency.
+   * Present only on memories created via temporal consolidation.
+   */
+  consolidation?: {
+    /** Consolidation method used (e.g., 'temporal', 'semantic') */
+    method: string;
+
+    /** ISO timestamp when consolidation was performed */
+    consolidated_at: string;
+
+    /** Time period of source memories (ISO 8601 interval or descriptive string) */
+    source_period?: string;
+
+    /** IDs of source memories that were consolidated */
+    source_ids: string[];
+
+    /** Schema version for consolidation metadata format */
+    version: number;
+
+    /**
+     * Hash of consolidation inputs for idempotency checks.
+     * Computed from: hash(sorted(source_ids) + window.start + window.end + focus + prompt_version)
+     */
+    summary_hash?: string;
+  };
 
   [key: string]: unknown;
 }
@@ -526,6 +589,35 @@ export type RefinementAction =
   | CreateRefinementAction;
 
 /**
+ * Temporal policy for handling temporal constraint violations during consolidation.
+ */
+export type TemporalPolicy =
+  | 'strict' // Reject window if any temporal rule fails
+  | 'warn-clamp' // Auto-clamp summary date to max(source.valid_at); log warning; continue
+  | 'warn-exclude' // Drop offending sources from window; surface in report
+  | 'off'; // Write with temporal_ok=false; surface red banner in UI
+
+/**
+ * Defines a consolidation window for temporal consolidation.
+ */
+export interface ConsolidationWindow {
+  /** Start date of the window (ISO 8601) */
+  startDate: string;
+
+  /** End date of the window (ISO 8601) */
+  endDate: string;
+
+  /** Optional: when consolidation happened; auto-picked if omitted */
+  consolidationDate?: string;
+
+  /** Optional: narrative focus (e.g., "Q1 learning") */
+  focus?: string;
+
+  /** Optional: hint to LLM about expected number of summaries */
+  expectedSummaryCount?: number;
+}
+
+/**
  * Arguments for the refine_memories tool.
  * Allows scoped refinement operations with budget controls.
  */
@@ -549,6 +641,15 @@ export interface RefineMemoriesToolArgs {
 
     /** Maximum number of candidate memories to consider */
     maxCandidates?: number;
+
+    /** Time range filter (filters by valid_at if present, otherwise createdAt) */
+    timeRange?: {
+      /** Filter memories after this date (ISO 8601) */
+      after?: string;
+
+      /** Filter memories before this date (ISO 8601) */
+      before?: string;
+    };
   };
 
   /** Maximum number of actions to execute (cost control) */
@@ -559,6 +660,21 @@ export interface RefineMemoriesToolArgs {
 
   /** Optional project-specific system message for refinement guidance */
   projectSystemMessagePath?: string;
+
+  /** Enable temporal consolidation mode */
+  temporalMode?: boolean;
+
+  /** Explicit consolidation windows (auto-detected if omitted when temporalMode=true) */
+  consolidationWindows?: ConsolidationWindow[];
+
+  /** Temporal policy for handling constraint violations (default: 'warn-clamp') */
+  temporalPolicy?: TemporalPolicy;
+
+  /** Hint to LLM about expected number of summaries across all windows */
+  expectedSummaryCount?: number;
+
+  /** Force execution even if idempotency checks find existing summaries */
+  force?: boolean;
 }
 
 /**
