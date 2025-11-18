@@ -4,6 +4,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 import { loadBackendConfig } from '../config/backend.js';
+import { loadDebugConfig } from '../config/debug.js';
 import { loadEmbeddingConfig } from '../config/embedding.js';
 import { EmbeddingService } from '../llm/EmbeddingService.js';
 import { MemoryRepositoryPostgres } from '../memory/MemoryRepositoryPostgres.js';
@@ -13,6 +14,7 @@ import { MemoryController } from '../memory/MemoryController.js';
 import { PromptManager } from '../llm/PromptManager.js';
 import { LLMClient } from '../llm/LLMClient.js';
 import { MemoryAgent } from '../llm/MemoryAgent.js';
+import { logger } from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -344,8 +346,10 @@ export function createMemoryServer(config?: {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const debugConfig = loadDebugConfig();
+    const shouldTime = debugConfig.enableRequestTiming;
 
-    try {
+    const executeRequest = async () => {
       switch (name) {
         case 'memorize':
           return await controller.handleMemorizeTool(args as any);
@@ -369,7 +373,52 @@ export function createMemoryServer(config?: {
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
+    };
+
+    if (!shouldTime) {
+      try {
+        return await executeRequest();
+      } catch (error) {
+        console.error(`Error handling tool "${name}":`, error);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: ${(error as Error).message}`,
+            },
+          ],
+        };
+      }
+    }
+
+    // With timing enabled - use manual timing to avoid logging full results
+    const requestId = `${name}-${Date.now()}`;
+    const argsMetadata = {
+      tool: name,
+      requestId,
+      index: (args as any)?.index,
+      hasFiles: Array.isArray((args as any)?.files) && (args as any).files.length > 0,
+      dryRun: (args as any)?.dryRun,
+    };
+
+    const startTime = Date.now();
+    try {
+      const result = await executeRequest();
+      const durationMs = Date.now() - startTime;
+      logger.metric(`mcp.request.${name}`, {
+        ...argsMetadata,
+        durationMs,
+        status: 'success',
+      });
+      return result;
     } catch (error) {
+      const durationMs = Date.now() - startTime;
+      logger.error(`mcp.request.${name}`, {
+        ...argsMetadata,
+        durationMs,
+        status: 'error',
+        error,
+      });
       console.error(`Error handling tool "${name}":`, error);
       return {
         content: [

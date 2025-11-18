@@ -18,7 +18,8 @@ import { loadRefinementConfig } from '../config/refinement.js';
 import { computeTypeDependentPriority } from './PriorityCalculator.js';
 import { MetadataValidator, ValidationError } from '../validators/MetadataValidator.js';
 import { MemorySearchError } from './MemorySearchError.js';
-import { debugLog } from '../utils/logger.js';
+import { debugLog, logger } from '../utils/logger.js';
+import { loadDebugConfig } from '../config/debug.js';
 import { parseFilterExpression } from './postgres/FilterParser.js';
 
 /**
@@ -46,6 +47,53 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
     this.pool = PoolManager.getPool(databaseUrl);
     this.projectId = projectId;
     this.embeddingService = embeddingService;
+  }
+
+  /**
+   * Execute a database query with optional performance logging
+   * Logs query duration and row count when query performance tracking is enabled
+   */
+  private async executeQuery<T extends object>(
+    label: string,
+    sql: string,
+    params?: any[],
+    context?: Record<string, unknown>
+  ): Promise<QueryResult<T>> {
+    const debugConfig = loadDebugConfig();
+    const shouldLog = debugConfig.enableQueryPerformance;
+
+    if (!shouldLog) {
+      return this.pool.query<T>(sql, params);
+    }
+
+    const startTime = Date.now();
+    try {
+      const result = await this.pool.query<T>(sql, params);
+      const durationMs = Date.now() - startTime;
+
+      // Only log if duration exceeds threshold or if threshold is 0 (log all)
+      if (
+        durationMs >= debugConfig.slowQueryThresholdMs ||
+        debugConfig.slowQueryThresholdMs === 0
+      ) {
+        logger.metric(`db.query.${label}`, {
+          durationMs,
+          rowCount: result.rowCount || 0,
+          ...context,
+        });
+      }
+
+      return result;
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      logger.error(`db.query.${label} failed`, {
+        durationMs,
+        error:
+          error instanceof Error ? { name: error.name, message: error.message } : String(error),
+        ...context,
+      });
+      throw error;
+    }
   }
 
   /**
@@ -91,13 +139,15 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
    * Resolve index UUID from index name, creating if necessary
    */
   private async resolveIndexId(indexName: string): Promise<string> {
-    const result = await this.pool.query<{ id: string }>(
+    const result = await this.executeQuery<{ id: string }>(
+      'resolve_index',
       `INSERT INTO memory_indexes (project, name, description)
        VALUES ($1, $2, $3)
        ON CONFLICT (project, name) DO UPDATE
        SET description = COALESCE(EXCLUDED.description, memory_indexes.description)
        RETURNING id`,
-      [this.projectId, indexName, `Auto-created index: ${indexName}`]
+      [this.projectId, indexName, `Auto-created index: ${indexName}`],
+      { indexName }
     );
 
     return result.rows[0].id;
@@ -107,12 +157,14 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
    * Public ensureIndex API - idempotent create
    */
   async ensureIndex(indexName: string, description?: string): Promise<void> {
-    await this.pool.query(
+    await this.executeQuery(
+      'ensure_index',
       `INSERT INTO memory_indexes (project, name, description)
        VALUES ($1, $2, $3)
        ON CONFLICT (project, name) DO UPDATE
        SET description = COALESCE(EXCLUDED.description, memory_indexes.description)`,
-      [this.projectId, indexName, description ?? null]
+      [this.projectId, indexName, description ?? null],
+      { indexName }
     );
   }
 
@@ -301,7 +353,10 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       RETURNING id
     `;
 
-    const result = await this.pool.query<{ id: string }>(query, values);
+    const result = await this.executeQuery<{ id: string }>('upsert_memories', query, values, {
+      memoryCount: memoryIds.length,
+      indexName,
+    });
 
     // Sync relationships to memory_relationships table
     const upsertedIds = result.rows.map((row: { id: string }) => row.id);
@@ -365,15 +420,32 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
     // Use a transaction to make delete and insert atomic
     const client = await this.pool.connect();
+    const debugConfig = loadDebugConfig();
+    const shouldLog = debugConfig.enableQueryPerformance;
+
     try {
       await client.query('BEGIN');
 
       // Delete existing relationships only for memory IDs that explicitly provided relationships
-      await client.query(
+      const deleteStart = Date.now();
+      const deleteResult = await client.query(
         `DELETE FROM memory_relationships
          WHERE project = $1 AND source_id = ANY($2::text[])`,
         [this.projectId, idsWithRelationships]
       );
+      if (shouldLog) {
+        const durationMs = Date.now() - deleteStart;
+        if (
+          durationMs >= debugConfig.slowQueryThresholdMs ||
+          debugConfig.slowQueryThresholdMs === 0
+        ) {
+          logger.metric('db.query.sync_relationships_delete', {
+            durationMs,
+            rowCount: deleteResult.rowCount || 0,
+            sourceIdCount: idsWithRelationships.length,
+          });
+        }
+      }
 
       // Insert new relationships if any exist
       if (relationshipsToInsert.length > 0) {
@@ -405,12 +477,33 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
             metadata = EXCLUDED.metadata
         `;
 
-        await client.query(insertQuery, values);
+        const insertStart = Date.now();
+        const insertResult = await client.query(insertQuery, values);
+        if (shouldLog) {
+          const durationMs = Date.now() - insertStart;
+          if (
+            durationMs >= debugConfig.slowQueryThresholdMs ||
+            debugConfig.slowQueryThresholdMs === 0
+          ) {
+            logger.metric('db.query.sync_relationships_insert', {
+              durationMs,
+              rowCount: insertResult.rowCount || 0,
+              relationshipCount: relationshipsToInsert.length,
+            });
+          }
+        }
       }
 
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
+      if (shouldLog) {
+        logger.error('db.query.sync_relationships_failed', {
+          error,
+          sourceIdCount: idsWithRelationships.length,
+          relationshipCount: relationshipsToInsert.length,
+        });
+      }
       throw error;
     } finally {
       client.release();
@@ -432,16 +525,18 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
     const memoryIdSet = new Set(memoryIds); // Performance: O(1) lookups instead of O(n)
 
     // Fetch all relationships (both outgoing and incoming) for these memory IDs
-    const result = await this.pool.query<{
+    const result = await this.executeQuery<{
       source_id: string;
       target_id: string;
       relationship_type: string;
       confidence: number;
     }>(
+      'populate_relationships',
       `SELECT source_id, target_id, relationship_type, confidence
        FROM memory_relationships
        WHERE project = $1 AND (source_id = ANY($2::text[]) OR target_id = ANY($2::text[]))`,
-      [this.projectId, memoryIds]
+      [this.projectId, memoryIds],
+      { memoryCount: memoryIds.length }
     );
 
     // Build maps for outgoing and incoming relationships
@@ -548,7 +643,10 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       WHERE id = ANY($2::text[])
     `;
 
-    await this.pool.query(query, [priorityBoost, idsToUpdate]);
+    await this.executeQuery('update_access_stats', query, [priorityBoost, idsToUpdate], {
+      memoryCount: idsToUpdate.length,
+      priorityBoost,
+    });
   }
 
   /**
@@ -573,9 +671,11 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
     try {
       // Resolve index ID
-      const indexResult = await this.pool.query<{ id: string }>(
+      const indexResult = await this.executeQuery<{ id: string }>(
+        'search_resolve_index',
         'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
-        [this.projectId, indexName]
+        [this.projectId, indexName],
+        { indexName }
       );
 
       if (indexResult.rows.length === 0) {
@@ -651,13 +751,13 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       searchQuery += ` ORDER BY semantic_score DESC LIMIT $${params.length + 1}`;
       params.push(limit);
 
-      const result = await this.pool.query<{
+      const result = await this.executeQuery<{
         id: string;
         content: string;
         metadata: any;
         created_at: Date;
         semantic_score: number;
-      }>(searchQuery, params);
+      }>('search_memories', searchQuery, params, { indexName, limit, semanticWeight });
 
       // Convert to SearchResult format
       const memoryRecords: MemoryRecord[] = result.rows.map(
@@ -758,9 +858,11 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
     }
 
     // Resolve index ID to ensure it exists
-    const indexResult = await this.pool.query<{ id: string }>(
+    const indexResult = await this.executeQuery<{ id: string }>(
+      'delete_resolve_index',
       'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
-      [this.projectId, indexName]
+      [this.projectId, indexName],
+      { indexName }
     );
 
     if (indexResult.rows.length === 0) {
@@ -770,13 +872,15 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
     const indexId = indexResult.rows[0].id;
 
-    const result = await this.pool.query<{ id: string }>(
+    const result = await this.executeQuery<{ id: string }>(
+      'delete_memories',
       `DELETE FROM memories
        WHERE index_id = $1
          AND project = $2
          AND id = ANY($3::text[])
        RETURNING id`,
-      [indexId, this.projectId, ids]
+      [indexId, this.projectId, ids],
+      { indexName, deleteCount: ids.length }
     );
 
     return result.rows.length;
@@ -787,9 +891,11 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
    */
   async getMemory(indexName: string, id: string): Promise<MemoryRecord | null> {
     // Resolve index ID
-    const indexResult = await this.pool.query<{ id: string }>(
+    const indexResult = await this.executeQuery<{ id: string }>(
+      'get_memory_resolve_index',
       'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
-      [this.projectId, indexName]
+      [this.projectId, indexName],
+      { indexName }
     );
 
     if (indexResult.rows.length === 0) {
@@ -798,18 +904,20 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
     const indexId = indexResult.rows[0].id;
 
-    const result = await this.pool.query<{
+    const result = await this.executeQuery<{
       id: string;
       content: string;
       created_at: Date;
       metadata: any;
     }>(
+      'get_memory',
       `SELECT id, content, created_at, metadata
        FROM memories
        WHERE index_id = $1
          AND project = $2
          AND id = $3`,
-      [indexId, this.projectId, id]
+      [indexId, this.projectId, id],
+      { indexName, memoryId: id }
     );
 
     if (result.rows.length === 0) {
@@ -841,9 +949,11 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
     }
 
     // Resolve index ID
-    const indexResult = await this.pool.query<{ id: string }>(
+    const indexResult = await this.executeQuery<{ id: string }>(
+      'get_memories_resolve_index',
       'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
-      [this.projectId, indexName]
+      [this.projectId, indexName],
+      { indexName }
     );
 
     if (indexResult.rows.length === 0) {
@@ -852,18 +962,20 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
     const indexId = indexResult.rows[0].id;
 
-    const result = await this.pool.query<{
+    const result = await this.executeQuery<{
       id: string;
       content: string;
       created_at: Date;
       metadata: any;
     }>(
+      'get_memories',
       `SELECT id, content, created_at, metadata
        FROM memories
        WHERE index_id = $1
          AND project = $2
          AND id = ANY($3::text[])`,
-      [indexId, this.projectId, ids]
+      [indexId, this.projectId, ids],
+      { indexName, memoryCount: ids.length }
     );
 
     const memories = result.rows.map(
@@ -888,9 +1000,11 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
    */
   async testIndex(indexName: string): Promise<boolean> {
     try {
-      const result = await this.pool.query<{ id: string }>(
+      const result = await this.executeQuery<{ id: string }>(
+        'test_index',
         'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
-        [this.projectId, indexName]
+        [this.projectId, indexName],
+        { indexName }
       );
       return result.rows.length > 0;
     } catch (error) {
@@ -904,7 +1018,8 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
    */
   async getDatabaseInfo(): Promise<DatabaseInfo> {
     // Get total document count
-    const totalResult = await this.pool.query<{ count: string }>(
+    const totalResult = await this.executeQuery<{ count: string }>(
+      'get_database_info_total',
       'SELECT COUNT(*) as count FROM memories WHERE project = $1',
       [this.projectId]
     );
@@ -912,10 +1027,11 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
     const documentCount = parseInt(totalResult.rows[0].count, 10);
 
     // Get per-index statistics
-    const indexResult = await this.pool.query<{
+    const indexResult = await this.executeQuery<{
       name: string;
       count: string;
     }>(
+      'get_database_info_indexes',
       `SELECT mi.name, COUNT(m.id)::text as count
        FROM memory_indexes mi
        LEFT JOIN memories m ON m.index_id = mi.id AND m.project = mi.project
@@ -943,11 +1059,12 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
    * List all indexes with their document counts.
    */
   async listIndexes(): Promise<IndexSummary[]> {
-    const result = await this.pool.query<{
+    const result = await this.executeQuery<{
       name: string;
       count: string;
       description: string | null;
     }>(
+      'list_indexes',
       `SELECT mi.name, mi.description, COUNT(m.id)::text as count
        FROM memory_indexes mi
        LEFT JOIN memories m ON m.index_id = mi.id AND m.project = mi.project

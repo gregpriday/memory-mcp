@@ -3,6 +3,8 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
 } from 'openai/resources/chat/completions';
+import { logger } from '../utils/logger.js';
+import { loadDebugConfig } from '../config/debug.js';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -28,10 +30,17 @@ export interface ToolCall {
   arguments: string; // JSON string
 }
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface LLMResponse {
   content: string | null;
   toolCalls?: ToolCall[];
   finishReason: string;
+  usage?: TokenUsage;
 }
 
 /**
@@ -139,11 +148,37 @@ export class LLMClient {
       completionOptions.response_format = { type: 'json_object' };
     }
 
+    const debugConfig = loadDebugConfig();
+    const shouldTrackTokens = debugConfig.enableTokenTracking;
+
     try {
+      const startTime = Date.now();
       const response = await this.openai.chat.completions.create(completionOptions);
+      const latencyMs = Date.now() - startTime;
 
       const choice = response.choices[0];
       const message = choice.message;
+
+      const usage = response.usage
+        ? {
+            promptTokens: response.usage.prompt_tokens,
+            completionTokens: response.usage.completion_tokens,
+            totalTokens: response.usage.total_tokens,
+          }
+        : undefined;
+
+      // Log token usage if enabled
+      if (shouldTrackTokens && usage) {
+        logger.metric('llm.usage', {
+          model,
+          operation: 'chatWithTools',
+          latencyMs,
+          hasToolCalls: !!message.tool_calls,
+          toolCallsCount: message.tool_calls?.length || 0,
+          finishReason: choice.finish_reason,
+          ...usage,
+        });
+      }
 
       return {
         content: message.content,
@@ -153,6 +188,7 @@ export class LLMClient {
           arguments: (tc as any).function.arguments,
         })),
         finishReason: choice.finish_reason,
+        usage,
       };
     } catch (error) {
       console.error('LLM API error:', error);
@@ -198,8 +234,27 @@ export class LLMClient {
       completionOptions.temperature = options.temperature;
     }
 
+    const debugConfig = loadDebugConfig();
+    const shouldTrackTokens = debugConfig.enableTokenTracking;
+
     try {
+      const startTime = Date.now();
       const response = await this.openai.chat.completions.create(completionOptions);
+      const latencyMs = Date.now() - startTime;
+
+      // Log token usage if enabled
+      if (shouldTrackTokens && response.usage) {
+        logger.metric('llm.usage', {
+          model,
+          operation: 'simpleChat',
+          latencyMs,
+          hasToolCalls: false,
+          finishReason: response.choices[0].finish_reason,
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens,
+        });
+      }
 
       return response.choices[0].message.content || '';
     } catch (error) {
@@ -251,7 +306,11 @@ Example:
 User: "What are the email rules?"
 Assistant: ["email style guide formatting preferences", "email communication template structure"]`;
 
+    const debugConfig = loadDebugConfig();
+    const shouldTrackTokens = debugConfig.enableTokenTracking;
+
     try {
+      const startTime = Date.now();
       const response = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
@@ -261,6 +320,21 @@ Assistant: ["email style guide formatting preferences", "email communication tem
         response_format: { type: 'json_object' },
         temperature: 0.7, // Allow some creativity for variation
       });
+      const latencyMs = Date.now() - startTime;
+
+      // Log token usage if enabled
+      if (shouldTrackTokens && response.usage) {
+        logger.metric('llm.usage', {
+          model: 'gpt-4o-mini',
+          operation: 'expandQuery',
+          latencyMs,
+          hasToolCalls: false,
+          finishReason: response.choices[0].finish_reason,
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens,
+        });
+      }
 
       const content = response.choices[0].message.content || '{"variations": []}';
       const parsed = JSON.parse(content);
