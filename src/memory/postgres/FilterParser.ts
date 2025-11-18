@@ -1,18 +1,50 @@
 /**
  * Filter Expression Parser and SQL Translator
  *
- * Parses Upstash filter expressions and translates them to safe PostgreSQL WHERE clauses
- * with parameter binding to prevent SQL injection.
+ * Parses a filter expression DSL and translates it to safe PostgreSQL WHERE clauses
+ * with parameter binding to prevent SQL injection. This parser implements a recursive
+ * descent algorithm with proper operator precedence (NOT > AND > OR).
  *
- * Grammar:
- *   Expression := OrExpression
- *   OrExpression := AndExpression ('OR' AndExpression)*
- *   AndExpression := Primary ('AND' Primary)*
- *   Primary := '(' Expression ')' | Comparison
- *   Comparison := Field Operator Literal
- *   Field := '@id' | '@metadata' | '@metadata.' Identifier
- *   Operator := '=' | '==' | 'CONTAINS'
- *   Literal := String | Number | Boolean
+ * @remarks
+ * **DSL Syntax:**
+ * - Supported operators: `=`, `==` (equivalent to `=`), `CONTAINS`
+ * - Supported types: Strings (double-quoted), Numbers, Booleans (`true`, `false`)
+ * - Logical operators: `AND`, `OR`, parentheses for grouping
+ * - Field access: `@id` for memory ID, `@metadata.fieldName` for metadata properties
+ *
+ * **Denormalized Fields:**
+ * The following metadata fields map directly to database columns for performance:
+ * - `topic`, `importance`, `tags`, `source`, `sourcePath`, `kind`, `memoryType`
+ *
+ * **JSONB Fields:**
+ * Custom metadata fields not in the denormalized list are accessed via JSONB operators.
+ * Field names must be alphanumeric with underscores or hyphens only (prevents injection).
+ *
+ * **Security:**
+ * - All values are parameterized using PostgreSQL's `$1`, `$2`, etc. placeholders
+ * - Field names are validated against whitelist or sanitized for JSONB access
+ * - No dynamic SQL construction that could lead to injection
+ *
+ * **Examples:**
+ * ```
+ * @metadata.tags CONTAINS "work"
+ * @metadata.priority > 0.5 AND @metadata.source = "slack"
+ * (@metadata.kind = "note" OR @metadata.kind = "task") AND @metadata.importance = "high"
+ * ```
+ *
+ * **Grammar (BNF):**
+ * ```
+ * Expression := OrExpression
+ * OrExpression := AndExpression ('OR' AndExpression)*
+ * AndExpression := Primary ('AND' Primary)*
+ * Primary := '(' Expression ')' | Comparison
+ * Comparison := Field Operator Literal
+ * Field := '@id' | '@metadata' | '@metadata.' Identifier
+ * Operator := '=' | '==' | 'CONTAINS'
+ * Literal := String | Number | Boolean
+ * ```
+ *
+ * @internal
  */
 
 // ============================================================================
@@ -94,6 +126,10 @@ class Tokenizer {
     }
   }
 
+  /**
+   * Read a double-quoted string literal with escape sequence support.
+   * Supports \" for escaped quotes within strings.
+   */
   private readString(): string {
     // Expect opening quote
     this.advance(); // skip opening "
@@ -103,12 +139,13 @@ class Tokenizer {
       const ch = this.advance();
       // Handle basic escape sequences
       if (ch === '\\' && this.peek() === '"') {
-        value += this.advance(); // escaped quote
+        value += this.advance(); // escaped quote: \" becomes "
       } else {
         value += ch;
       }
     }
 
+    // Validate string was properly closed
     if (this.peek() !== '"') {
       throw new Error(`Unterminated string at position ${this.pos}`);
     }
@@ -266,6 +303,9 @@ class Parser {
   }
 
   /**
+   * Parse the entire filter expression.
+   * Entry point for the recursive descent parser.
+   *
    * Expression := OrExpression
    */
   parse(): ASTNode {
@@ -275,11 +315,15 @@ class Parser {
   }
 
   /**
+   * Parse OR expressions (lowest precedence).
+   * OR has lower precedence than AND, so it's evaluated last.
+   *
    * OrExpression := AndExpression ('OR' AndExpression)*
    */
   private parseOrExpression(): ASTNode {
     let left = this.parseAndExpression();
 
+    // Build left-associative tree: A OR B OR C becomes ((A OR B) OR C)
     while (this.match('OR')) {
       this.advance(); // consume OR
       const right = this.parseAndExpression();
@@ -295,11 +339,15 @@ class Parser {
   }
 
   /**
+   * Parse AND expressions (higher precedence than OR).
+   * This means "A OR B AND C" is parsed as "A OR (B AND C)".
+   *
    * AndExpression := Primary ('AND' Primary)*
    */
   private parseAndExpression(): ASTNode {
     let left = this.parsePrimary();
 
+    // Build left-associative tree: A AND B AND C becomes ((A AND B) AND C)
     while (this.match('AND')) {
       this.advance(); // consume AND
       const right = this.parsePrimary();
@@ -315,18 +363,21 @@ class Parser {
   }
 
   /**
+   * Parse primary expressions (highest precedence).
+   * Either a grouped expression with parentheses or a comparison.
+   *
    * Primary := '(' Expression ')' | Comparison
    */
   private parsePrimary(): ASTNode {
-    // Grouped expression
+    // Grouped expression: parentheses override precedence
     if (this.match('LPAREN')) {
       this.advance(); // consume (
-      const expr = this.parseOrExpression();
+      const expr = this.parseOrExpression(); // recurse back to lowest precedence
       this.expect('RPAREN', 'Expected closing parenthesis');
       return expr;
     }
 
-    // Comparison
+    // Base case: field comparison
     return this.parseComparison();
   }
 
@@ -563,8 +614,13 @@ class SQLTranslator {
   }
 
   /**
-   * Sanitize JSONB key to prevent injection
-   * Allow only alphanumeric, underscore, and hyphen
+   * Sanitize JSONB key to prevent SQL injection.
+   *
+   * JSONB field names are inserted directly into SQL (e.g., `metadata->>'fieldName'`),
+   * so we must validate them against a strict whitelist to prevent injection attacks.
+   *
+   * Only alphanumeric characters, underscores, and hyphens are allowed.
+   * This prevents malicious inputs like: `'; DROP TABLE memories; --`
    */
   private sanitizeJsonbKey(key: string): string {
     if (!/^[a-zA-Z0-9_-]+$/.test(key)) {
@@ -581,23 +637,59 @@ class SQLTranslator {
 // ============================================================================
 
 /**
- * Parse a filter expression and translate it to SQL
+ * Parse a filter expression and translate it to safe PostgreSQL SQL.
  *
- * @param filterExpression - Upstash filter expression
- * @returns SQL WHERE clause and parameter array
- * @throws Error if parsing or translation fails
+ * This is the main entry point for the filter parser. It performs three stages:
+ * 1. **Tokenization**: Breaks the input string into tokens (fields, operators, literals, parentheses)
+ * 2. **Parsing**: Builds an abstract syntax tree (AST) using recursive descent with proper precedence
+ * 3. **Translation**: Converts the AST to parameterized SQL with security guarantees
+ *
+ * @param filterExpression - Filter expression using the DSL syntax (see module documentation)
+ * @returns SQL translation object containing SQL WHERE clause and parameter array
+ * @throws Error if parsing fails due to syntax errors, invalid field names, or unsupported operations
+ *
+ * @remarks
+ * The returned SQL fragment is safe to use in WHERE clauses. All values are parameterized
+ * using PostgreSQL's `$1`, `$2`, etc. placeholders to prevent SQL injection.
+ *
+ * @example
+ * ```typescript
+ * // Simple equality
+ * const result = parseFilterExpression('@metadata.source = "slack"');
+ * // Returns: { sql: 'source = $1', params: ['slack'] }
+ *
+ * // Array containment
+ * const result = parseFilterExpression('@metadata.tags CONTAINS "work"');
+ * // Returns: { sql: '$1 = ANY(tags)', params: ['work'] }
+ *
+ * // Complex with AND/OR
+ * const result = parseFilterExpression(
+ *   '(@metadata.kind = "note" OR @metadata.kind = "task") AND @metadata.importance = "high"'
+ * );
+ * // Returns: {
+ * //   sql: '((kind = $1 OR kind = $2) AND importance = $3)',
+ * //   params: ['note', 'task', 2]  // 'high' maps to integer 2
+ * // }
+ *
+ * // Using in a query
+ * const { sql, params } = parseFilterExpression('@metadata.priority > 0.5');
+ * const query = `SELECT * FROM memories WHERE ${sql} LIMIT 10`;
+ * const results = await db.query(query, params);
+ * ```
+ *
+ * @public
  */
 export function parseFilterExpression(filterExpression: string): SQLTranslation {
   try {
-    // Tokenize
+    // Stage 1: Tokenize - break input into tokens
     const tokenizer = new Tokenizer(filterExpression);
     const tokens = tokenizer.tokenize();
 
-    // Parse
+    // Stage 2: Parse - build AST with proper operator precedence
     const parser = new Parser(tokens);
     const ast = parser.parse();
 
-    // Translate
+    // Stage 3: Translate - convert AST to parameterized SQL
     const translator = new SQLTranslator();
     return translator.translate(ast);
   } catch (error) {

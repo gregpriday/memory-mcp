@@ -100,6 +100,9 @@ describe('Index Tools Integration Tests', () => {
       0,
       'New index should have pendingDocumentCount of 0'
     );
+
+    // Verify description is returned
+    assert.strictEqual(foundIndex.description, description, 'Index should include description');
   });
 
   it('should handle multiple indexes correctly', async () => {
@@ -130,14 +133,34 @@ describe('Index Tools Integration Tests', () => {
     );
     assert.strictEqual(testIndexes?.length, 3, 'Should find all three test indexes');
 
-    testIndexes?.forEach((idx) => {
-      assert.strictEqual(idx.documentCount, 0, `Index ${idx.name} should have documentCount of 0`);
-      assert.strictEqual(
-        idx.pendingDocumentCount,
-        0,
-        `Index ${idx.name} should have pendingDocumentCount of 0`
-      );
-    });
+    // Verify each index has correct documentCount and description
+    const idx1 = testIndexes?.find((idx) => idx.name === index1);
+    const idx2 = testIndexes?.find((idx) => idx.name === index2);
+    const idx3 = testIndexes?.find((idx) => idx.name === index3);
+
+    assert.ok(idx1, 'Should find index 1');
+    assert.strictEqual(idx1.documentCount, 0, 'Index 1 should have documentCount of 0');
+    assert.strictEqual(
+      idx1.description,
+      'First test index',
+      'Index 1 should have correct description'
+    );
+
+    assert.ok(idx2, 'Should find index 2');
+    assert.strictEqual(idx2.documentCount, 0, 'Index 2 should have documentCount of 0');
+    assert.strictEqual(
+      idx2.description,
+      'Second test index',
+      'Index 2 should have correct description'
+    );
+
+    assert.ok(idx3, 'Should find index 3');
+    assert.strictEqual(idx3.documentCount, 0, 'Index 3 should have documentCount of 0');
+    assert.strictEqual(
+      idx3.description,
+      'Third test index',
+      'Index 3 should have correct description'
+    );
 
     // Verify top-level documentCount
     if (typeof listResult.documentCount === 'number') {
@@ -171,6 +194,37 @@ describe('Index Tools Integration Tests', () => {
       parseInt(dbResult.rows[0].count, 10),
       1,
       'Should have exactly one index row (not duplicated)'
+    );
+  });
+
+  it('should handle indexes without descriptions gracefully', async () => {
+    const indexName = `${testIndexPrefix}${Date.now()}-no-desc`;
+
+    // Create index without description (pass undefined)
+    const result = await harness.callCreateIndex(indexName);
+    assert.strictEqual(result.status, 'ok', 'Index creation without description should succeed');
+
+    // List indexes
+    const listResult = await harness.callListIndexes();
+    assert.strictEqual(listResult.status, 'ok', 'List indexes should succeed');
+
+    // Find our test index
+    const foundIndex = listResult.indexes?.find((idx) => idx.name === indexName);
+    assert.ok(foundIndex, `Should find index "${indexName}" in list`);
+
+    // Verify description is undefined (not an error)
+    assert.strictEqual(
+      foundIndex.description,
+      undefined,
+      'Index without description should have undefined description'
+    );
+
+    // Verify index is still functional (has documentCount, etc.)
+    assert.strictEqual(foundIndex.documentCount, 0, 'Index should have documentCount of 0');
+    assert.strictEqual(
+      foundIndex.pendingDocumentCount,
+      0,
+      'Index should have pendingDocumentCount of 0'
     );
   });
 });
