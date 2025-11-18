@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { createMemoryServer } from '../MemoryServer.js';
-import { loadBackendConfig } from '../../config/backend.js';
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 
 /**
@@ -21,13 +20,11 @@ describe('MemoryServer E2E Tests', () => {
   let testApiKey: string;
 
   beforeAll(async () => {
-    // Load test database configuration
-    const config = await loadBackendConfig();
-    const testConfig = config.projectRegistry.test;
-    if (!testConfig) {
-      throw new Error('Test project not found in backend config');
+    // Get database URL from environment (set by jest.setup.cjs)
+    testDatabaseUrl = process.env.DATABASE_URL || '';
+    if (!testDatabaseUrl) {
+      throw new Error('DATABASE_URL not set in test environment');
     }
-    testDatabaseUrl = testConfig.databaseUrl;
 
     // Use test API key
     testApiKey = process.env.OPENAI_API_KEY || 'test-key-for-server-creation';

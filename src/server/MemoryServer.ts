@@ -45,13 +45,7 @@ export function createMemoryServer(config?: {
 }): Server {
   const backend = loadBackendConfig();
 
-  if (!backend.activeProject) {
-    throw new Error(
-      'No active project configured. Set MEMORY_ACTIVE_PROJECT and MEMORY_POSTGRES_PROJECT_REGISTRY.'
-    );
-  }
-
-  const databaseUrl = config?.databaseUrl || backend.activeProject.databaseUrl;
+  const databaseUrl = config?.databaseUrl || backend.databaseUrl;
 
   let parsedDatabaseUrl: URL;
   try {
@@ -79,7 +73,7 @@ export function createMemoryServer(config?: {
   })();
   logInfo('server', 'postgres-backend-active', {
     meta: {
-      projectId: backend.activeProject.projectId,
+      projectId: backend.projectId,
       database: sanitizedUrl,
     },
   });
@@ -88,9 +82,7 @@ export function createMemoryServer(config?: {
   const projectRoot = config?.projectRoot || process.cwd();
 
   if (!databaseUrl) {
-    throw new Error(
-      'No Postgres database URL configured. Update MEMORY_POSTGRES_PROJECT_REGISTRY.'
-    );
+    throw new Error('No Postgres database URL configured. Set DATABASE_URL environment variable.');
   }
 
   if (!openaiApiKey) {
@@ -111,18 +103,14 @@ export function createMemoryServer(config?: {
     embeddingConfig.dimensions
   );
 
-  const repository = new MemoryRepositoryPostgres(
-    databaseUrl,
-    backend.activeProject.projectId,
-    embeddingService
-  );
+  const repository = new MemoryRepositoryPostgres(databaseUrl, backend.projectId, embeddingService);
 
   // Log configuration summary at startup
   logInfo('server', 'configuration-loaded', {
     meta: {
       embeddingModel: embeddingConfig.model,
       embeddingDimensions: embeddingConfig.dimensions,
-      projectId: backend.activeProject.projectId,
+      projectId: backend.projectId,
       llmModel: process.env.MEMORY_MODEL || 'gpt-5-mini',
     },
   });
@@ -133,7 +121,7 @@ export function createMemoryServer(config?: {
     chunkOverlapChars: getEnvInt('MEMORY_CHUNK_CHAR_OVERLAP', 2_000),
     maxChunksPerFile: getEnvInt('MEMORY_MAX_CHUNKS_PER_FILE', 24),
     maxMemoriesPerFile: getEnvInt('MEMORY_MAX_MEMORIES_PER_FILE', 50),
-    projectId: backend.activeProject.projectId,
+    projectId: backend.projectId,
   });
 
   const controller = new MemoryController(indexResolver, agent, fileLoader);

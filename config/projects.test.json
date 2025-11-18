@@ -1,5 +1,0 @@
-{
-  "test": {
-    "databaseUrl": "postgresql://postgres:postgres@localhost:5433/memory_test"
-  }
-}

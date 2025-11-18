@@ -1,7 +1,6 @@
 import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { config } from 'dotenv';
-import { loadBackendConfig } from '../src/config/backend.js';
 import { TestServerHarness } from './helpers/TestServerHarness.js';
 import { FakeEmbeddingService } from './helpers/FakeEmbeddingService.js';
 import { ScriptedLLMClient } from './helpers/ScriptedLLMClient.js';
@@ -17,9 +16,11 @@ describe('Refine Memories Tool Integration Tests', () => {
   const testIndexPrefix = 'refine-test-';
 
   before(async () => {
-    // Load database URL from backend config (projects.json)
-    const backendConfig = loadBackendConfig();
-    const databaseUrl = backendConfig.activeProject.databaseUrl;
+    // Get database URL from environment
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error('DATABASE_URL not set in test environment');
+    }
 
     // Create harness with scripted LLM and fake embedding service
     scriptedLLM = new ScriptedLLMClient();

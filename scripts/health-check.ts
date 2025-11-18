@@ -72,8 +72,7 @@ async function main() {
   console.log('🏥 Memory MCP Health Check\n');
   console.log('Running diagnostics...\n');
 
-  const configPath = join(projectRoot, 'config', 'projects.json');
-  const results = await runHealthChecks(projectRoot, configPath);
+  const results = await runHealthChecks(projectRoot);
 
   // Print results
   for (const result of results) {
@@ -107,7 +106,7 @@ main().catch((err) => {
       );
     } else if (err.message.includes('authentication failed') || err.message.includes('password')) {
       console.error('\n💡 Hint: Authentication failed.');
-      console.error('   Check username and password in config/projects.json');
+      console.error('   Check username and password in DATABASE_URL environment variable');
     } else if (err.message.includes('vector')) {
       console.error('\n💡 Hint: pgvector extension may not be installed.');
       console.error(
