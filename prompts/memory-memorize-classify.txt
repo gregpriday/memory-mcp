@@ -1,0 +1,102 @@
+# Memory Classification Guide
+
+## Classification Types
+
+Every memory you extract must be classified into exactly one of these five semantic types. Follow the decision tree in order:
+
+### 1. Self Memory
+**Definition:** First-person identity statements about the persona (user/agent).
+
+**Indicators:**
+- "I am...", "I like...", "My name is...", "I believe in..."
+- Personal preferences, traits, or identity markers
+- Information about the persona's core identity
+
+**Example:**
+- Input: "I'm Greg and I prefer dark mode for all my apps"
+- Reasoning: First-person identity statement containing name and personal preference
+- Output: `{ "memoryType": "self", "text": "User's name is Greg and prefers dark mode for all apps" }`
+
+### 2. Belief Memory
+**Definition:** Generalizations and stable stances held by the persona (not about identity itself).
+
+**Indicators:**
+- Opinions about how things should work
+- Worldviews, principles, or philosophies
+- Stable attitudes or judgments
+- Not first-person identity, but still persona-specific
+
+**Example:**
+- Input: "Code should always be tested before deployment"
+- Reasoning: General stance about software development practices
+- Output: `{ "memoryType": "belief", "text": "User believes code should always be tested before deployment" }`
+
+### 3. Pattern Memory
+**Definition:** Repeated behaviors, procedures, templates, or workflows.
+
+**Indicators:**
+- "I usually...", "I always...", "My workflow is..."
+- Standard operating procedures
+- Recurring habits or routines
+- Templates or boilerplate patterns
+
+**Example:**
+- Input: "When I start a new project, I always create a README first, then set up git, then install dependencies"
+- Reasoning: Describes a repeated sequence of actions (workflow pattern)
+- Output: `{ "memoryType": "pattern", "text": "User's project setup workflow: 1) Create README, 2) Set up git, 3) Install dependencies" }`
+
+### 4. Episodic Memory
+**Definition:** Specific, time-bound experiences or events.
+
+**Indicators:**
+- Specific dates, times, or temporal markers
+- One-time events or experiences
+- Contextual details about "when" or "where"
+- Personal narratives or stories
+
+**Example:**
+- Input: "Yesterday I fixed a bug in the authentication module that was causing login failures"
+- Reasoning: Time-bound event (yesterday) with specific context
+- Output: `{ "memoryType": "episodic", "text": "Fixed authentication module bug causing login failures (yesterday)" }`
+
+### 5. Semantic Memory
+**Definition:** General facts or principles independent of the persona.
+
+**Indicators:**
+- Universal truths or facts
+- Technical knowledge or definitions
+- Information not specific to the persona
+- External knowledge or references
+
+**Example:**
+- Input: "PostgreSQL uses MVCC for transaction isolation"
+- Reasoning: General technical fact, not persona-specific
+- Output: `{ "memoryType": "semantic", "text": "PostgreSQL uses MVCC (Multi-Version Concurrency Control) for transaction isolation" }`
+
+## Decision Tree
+
+Follow this order when classifying:
+
+1. **Is it a first-person identity statement?** → Self
+2. **Is it a personal belief, opinion, or stance?** → Belief
+3. **Is it a repeated behavior or procedure?** → Pattern
+4. **Is it a specific, time-bound event?** → Episodic
+5. **Default: General fact or knowledge** → Semantic
+
+## Handling Overlaps
+
+When a memory could fit multiple categories:
+- **Self always takes precedence** over other types
+- **Time-bound + personal** → Episodic (not Pattern)
+- **Repeated behavior + opinion** → Pattern (action) vs Belief (stance) - choose based on emphasis
+
+## Required Output
+
+For every memory you create, include a `memoryType` field in the metadata with one of these exact values:
+- `"self"`
+- `"belief"`
+- `"pattern"`
+- `"episodic"`
+- `"semantic"`
+
+This classification enables smarter retrieval, consolidation, and decay logic downstream.
