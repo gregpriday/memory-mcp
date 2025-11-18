@@ -97,17 +97,33 @@ export class ReconsolidationExecutor {
             `Creating ${validDerivedMemories.length} derived memories (${plan.derivedMemories.length - validDerivedMemories.length} rejected)`
           );
 
-          const memoriesToUpsert: MemoryToUpsert[] = validDerivedMemories.map((derived) => ({
-            text: derived.text,
-            metadata: {
-              ...derived.metadata,
-              memoryType: derived.memoryType,
-              kind: 'derived',
-              derivedFromIds: derived.derivedFromIds,
-              relationships: derived.relationships,
-              source: 'system' as const,
-            } as Partial<MemoryMetadata>,
-          }));
+          const memoriesToUpsert: MemoryToUpsert[] = validDerivedMemories.map((derived) => {
+            // Security: Validate relationship targets are in validMemoryIds or newly created IDs
+            const validRelationships =
+              derived.relationships?.filter((rel) => {
+                const targetIsRecalled = validMemoryIds.has(rel.targetId);
+                const targetIsNewlyCreated = createdIds.includes(rel.targetId);
+                if (!targetIsRecalled && !targetIsNewlyCreated) {
+                  debugLog(
+                    'reconsolidation',
+                    `Rejecting relationship targeting non-recalled ID: ${rel.targetId}`
+                  );
+                }
+                return targetIsRecalled || targetIsNewlyCreated;
+              }) ?? [];
+
+            return {
+              text: derived.text,
+              metadata: {
+                ...derived.metadata,
+                memoryType: derived.memoryType,
+                kind: 'derived',
+                derivedFromIds: derived.derivedFromIds,
+                relationships: validRelationships,
+                source: 'system' as const,
+              } as Partial<MemoryMetadata>,
+            };
+          });
 
           const newIds = await this.repo.upsertMemories(indexName, memoriesToUpsert);
           createdIds.push(...newIds);
@@ -146,10 +162,23 @@ export class ReconsolidationExecutor {
               supersededById: createdIds[pair.supersededById],
             });
           } else {
-            // Direct string ID reference
+            // Direct string ID reference - must be in validMemoryIds or newly created IDs
+            const targetId = String(pair.supersededById);
+            const targetIsRecalled = validMemoryIds.has(targetId);
+            const targetIsNewlyCreated = createdIds.includes(targetId);
+
+            if (!targetIsRecalled && !targetIsNewlyCreated) {
+              debugLog(
+                'reconsolidation',
+                `Security: Rejecting supersession with invalid string supersededById: ${targetId}`
+              );
+              warnings.push(`Rejected supersession with invalid target ID: ${targetId}`);
+              continue;
+            }
+
             supersessionPairsWithIds.push({
               sourceId: pair.sourceId,
-              supersededById: String(pair.supersededById),
+              supersededById: targetId,
             });
           }
         }

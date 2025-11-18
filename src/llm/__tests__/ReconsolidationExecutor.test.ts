@@ -107,7 +107,7 @@ describe('ReconsolidationExecutor', () => {
       mockRepo.markMemoriesSuperseded.mockResolvedValue(2);
       mockRepo.incrementSleepCycles.mockResolvedValue(1);
 
-      const validMemoryIds = new Set(['old-belief-1', 'old-belief-2']);
+      const validMemoryIds = new Set(['old-belief-1', 'old-belief-2', 'existing-mem-id']);
       const report = await executor.execute(plan, 'test-index', validMemoryIds);
 
       // Verify supersessions were applied
