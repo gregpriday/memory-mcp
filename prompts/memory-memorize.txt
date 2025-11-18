@@ -25,7 +25,13 @@ You are in **memorize mode**. Your task is to process information and store it a
 - `topic`: The main subject or theme
 - `tags`: Array of relevant keywords/concepts (3-7 tags recommended)
 - `importance`: 'low', 'medium', or 'high' based on significance
-- `date`: Logical date of the content (YYYY-MM-DD format) if relevant
+- `date`: Logical date of the content (YYYY-MM-DD format) if relevant (human-readable reference)
+- `timestamp`: ISO 8601 creation timestamp for priority decay calculations (optional, defaults to now)
+  - Use this field when ingesting historical content with known creation dates
+  - Format: "2025-02-04T10:00:00Z" (with time) or "2025-02-04" (date only)
+  - Enables proper priority decay: a 9-month-old episodic memory will have priority ~0.2, not 0.8
+  - IMPORTANT: Use `timestamp` for storage time calculations; `date` is descriptive metadata for humans
+  - Example: When importing old YouTube scripts from Feb 2025, set timestamp to the actual upload date
 - `relationships`: When possible, attach structured relationships to existing memories using objects like `{ "targetId": "mem_xxx", "type": "supports" }`
   - Only reference memory IDs you actually observed in this tool loop (for example from `search_memories` results)
   - Never guess or fabricate IDs
@@ -44,7 +50,8 @@ Good output (2 memories):
        topic: "pricing psychology",
        tags: ["pricing", "psychology", "anchoring"],
        importance: "high"
-     }
+     },
+     timestamp: "2025-02-04T10:00:00Z"
    }
 2. {
      text: "Decoy pricing is a psychological technique used in pricing strategy",
@@ -53,7 +60,8 @@ Good output (2 memories):
        topic: "pricing psychology",
        tags: ["pricing", "psychology", "decoys"],
        importance: "high"
-     }
+     },
+     timestamp: "2025-02-04T10:00:00Z"
    }
 
 When a new memory clearly relates to an existing one, attach a relationship object referencing the real memory ID you found via `search_memories`, for example:

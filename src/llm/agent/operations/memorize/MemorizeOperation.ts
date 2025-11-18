@@ -96,6 +96,7 @@ export class MemorizeOperation {
             text?: unknown;
             metadata?: unknown;
             memoryType?: unknown;
+            timestamp?: unknown;
           };
 
           const text = typeof candidate.text === 'string' ? candidate.text.trim() : '';
@@ -113,12 +114,27 @@ export class MemorizeOperation {
             metadata.memoryType = candidate.memoryType as MemoryMetadata['memoryType'];
           }
 
+          // Preserve timestamp for backdating memories (validate ISO 8601 format)
+          const isValidTimestampFormat = (ts: unknown): boolean => {
+            if (typeof ts !== 'string') return false;
+            const isoRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})?)?$/;
+            if (!isoRegex.test(ts.trim())) return false;
+            const parsed = new Date(ts);
+            return !Number.isNaN(parsed.getTime());
+          };
+
+          const timestamp =
+            typeof candidate.timestamp === 'string' && isValidTimestampFormat(candidate.timestamp)
+              ? candidate.timestamp
+              : undefined;
+
           return {
             text,
             metadata,
+            ...(timestamp && { timestamp }),
           };
         })
-        .filter((memory): memory is MemoryToUpsert => Boolean(memory));
+        .filter((memory: MemoryToUpsert | null): memory is MemoryToUpsert => Boolean(memory));
     } catch (error) {
       console.warn('Failed to parse memory-analyzer output', error, raw?.slice?.(0, 200));
       return [];
@@ -209,7 +225,7 @@ export class MemorizeOperation {
       }
 
       const remainingSlots = this.ingestionConfig.maxMemoriesPerFile - collectedMemories.length;
-      const normalized = analyzedMemories.slice(0, remainingSlots).map((memory) => {
+      const normalized = analyzedMemories.slice(0, remainingSlots).map((memory: MemoryToUpsert) => {
         const metadata = { ...(memory.metadata || {}) } as Record<string, unknown>;
         metadata.source = 'file';
         metadata.sourcePath = path;
@@ -218,10 +234,15 @@ export class MemorizeOperation {
         metadata.chunkCount = totalChunks;
         metadata.chunkCharLength = chunk.length;
         metadata.byteSize = byteSize;
-        return {
+        const normalizedMemory: MemoryToUpsert = {
           text: memory.text,
           metadata,
         };
+        // Preserve timestamp for backdating if provided by analyzer
+        if (memory.timestamp) {
+          normalizedMemory.timestamp = memory.timestamp;
+        }
+        return normalizedMemory;
       });
 
       collectedMemories.push(...normalized);

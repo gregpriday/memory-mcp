@@ -24,7 +24,8 @@ Return your analysis as a JSON object with the following structure:
         "tags": ["tag1", "tag2"],
         "importance": "high|medium|low",
         "confidence": 0.0-1.0
-      }
+      },
+      "timestamp": "2025-02-04T10:00:00Z"
     }
   ],
   "summary": "Brief 1-2 sentence summary of the entire text",
@@ -41,6 +42,10 @@ Return your analysis as a JSON object with the following structure:
 4. **Assign confidence**: Rate your confidence in the extraction (1.0 = certain, 0.5 = moderate, 0.3 = low).
 5. **Avoid redundancy**: Don't extract the same information multiple times.
 6. **Context matters**: Include enough context so the fact stands alone.
+7. **Extract timestamps for backdating**: When content has an explicit creation date (file metadata, article publish date, git history, etc.), include it as a top-level `timestamp` field in ISO 8601 format (e.g., "2025-02-04T10:00:00Z" or "2025-02-04")
+   - Enables accurate priority decay calculations reflecting when the content was actually created
+   - Only include timestamp if confident in the date; omit if ambiguous or uncertain
+   - Include in `metadata.date` as well for human context
 
 ## Examples
 
@@ -60,7 +65,8 @@ PostgreSQL is an open-source relational database system. It supports advanced fe
         "tags": ["postgresql", "database", "open-source"],
         "importance": "high",
         "confidence": 1.0
-      }
+      },
+      "timestamp": "2025-02-04T10:00:00Z"
     },
     {
       "text": "PostgreSQL supports JSONB, full-text search, and foreign data wrappers",
@@ -69,7 +75,8 @@ PostgreSQL is an open-source relational database system. It supports advanced fe
         "tags": ["postgresql", "features"],
         "importance": "medium",
         "confidence": 1.0
-      }
+      },
+      "timestamp": "2025-02-04T10:00:00Z"
     },
     {
       "text": "PostgreSQL 16 introduced logical replication improvements and better query parallelism",
@@ -78,7 +85,8 @@ PostgreSQL is an open-source relational database system. It supports advanced fe
         "tags": ["postgresql", "version-16", "performance"],
         "importance": "medium",
         "confidence": 1.0
-      }
+      },
+      "timestamp": "2025-02-04T10:00:00Z"
     }
   ],
   "summary": "PostgreSQL is an open-source relational database with advanced features like JSONB and full-text search, with version 16 bringing replication and parallelism improvements.",

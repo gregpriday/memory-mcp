@@ -354,5 +354,51 @@ describe('Memorize Tools Integration Tests', () => {
         'Second LLM call should receive previousResponseId from first call'
       );
     });
+
+    it('should propagate timestamp from upsert_memories tool to stored memory', async () => {
+      const indexName = `${testIndexPrefix}${Date.now()}-timestamp`;
+      const inputText = 'Test timestamp propagation';
+      // The deterministic timestamp from FakeLLMClient: '2025-02-04T10:00:00Z'
+
+      // Reset the fake LLM client
+      fakeLLMClient.reset();
+
+      // Call memorize with input text
+      const result = await harnessWithFakes.callMemorize({
+        input: inputText,
+        index: indexName,
+        metadata: {
+          source: 'user',
+          topic: 'timestamp-test',
+        },
+        force: true,
+      });
+
+      // Verify memory was stored
+      assert.strictEqual(result.status, 'ok', 'Memorize should succeed');
+      assert.strictEqual(result.storedCount, 1, 'Should store exactly 1 memory');
+
+      // Get the stored memory from database
+      const memoryId = result.memoryIds[0];
+      const row = await harnessWithFakes.getMemoryRow(memoryId);
+      assert.ok(row, 'Memory should exist in database');
+
+      // Verify that the timestamp from the tool call was stored in metadata
+      // The test verifies end-to-end timestamp propagation through:
+      // FakeLLMClient -> upsert_memories tool args -> ToolRuntime -> MemorizeOperation -> Repository -> Database
+      assert.ok(
+        row!.metadata.timestamp,
+        'Memory metadata should have a timestamp field reflecting the backdated value'
+      );
+
+      // Verify the timestamp matches what FakeLLMClient emitted (ISO 8601 format)
+      const expectedTimestamp = '2025-02-04T10:00:00Z';
+      const storedTimestamp = row!.metadata.timestamp;
+      assert.strictEqual(
+        storedTimestamp,
+        expectedTimestamp,
+        `Timestamp should be propagated with correct value. Expected ${expectedTimestamp}, got ${storedTimestamp}`
+      );
+    });
   });
 });

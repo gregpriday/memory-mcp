@@ -211,6 +211,11 @@ export class ToolRuntime {
                 properties: {
                   text: { type: 'string' },
                   metadata: { type: 'object' },
+                  timestamp: {
+                    type: 'string',
+                    description:
+                      'ISO 8601 timestamp for when this memory was created (optional, defaults to now). Use for backdating historical content. Format: "2025-02-04T10:00:00Z" or "2025-02-04" for date only.',
+                  },
                 },
                 required: ['text'],
               },
@@ -457,19 +462,39 @@ export class ToolRuntime {
             }
           }
 
+          // Helper to validate ISO 8601 timestamp format
+          const isValidTimestamp = (ts: unknown): boolean => {
+            if (typeof ts !== 'string') return false;
+            // Accept both ISO 8601 full datetime and date-only formats
+            // Examples: "2025-02-04T10:00:00Z", "2025-02-04"
+            const isoRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})?)?$/;
+            if (!isoRegex.test(ts.trim())) return false;
+            // Verify the date is actually parseable
+            const parsed = new Date(ts);
+            return !Number.isNaN(parsed.getTime());
+          };
+
           // Normalize memoryType: move from top-level to metadata if present
           const normalizedMemories = cappedMemories.map((memory) => {
             // Sanitize null metadata to prevent downstream crashes
             const sanitizedMemory = memory.metadata === null ? { ...memory, metadata: {} } : memory;
 
+            // Validate and preserve timestamp if present
+            let finalMemory: MemoryToUpsert = sanitizedMemory;
+            if (sanitizedMemory.timestamp && !isValidTimestamp(sanitizedMemory.timestamp)) {
+              // Drop invalid timestamps to prevent errors downstream
+              const { timestamp: _ts, ...rest } = sanitizedMemory;
+              finalMemory = rest;
+            }
+
             // If memoryType exists at top level, validate and move to metadata
-            if (sanitizedMemory.memoryType && typeof sanitizedMemory.memoryType === 'string') {
-              const typedMemoryType = sanitizedMemory.memoryType as MemoryType;
-              const { memoryType: _memoryType, ...rest } = sanitizedMemory;
+            if (finalMemory.memoryType && typeof finalMemory.memoryType === 'string') {
+              const typedMemoryType = finalMemory.memoryType as MemoryType;
+              const { memoryType: _memoryType, ...rest } = finalMemory;
 
               // Only persist valid memory types
               if (VALID_MEMORY_TYPES.has(typedMemoryType)) {
-                const metadata = { ...(sanitizedMemory.metadata || {}) };
+                const metadata = { ...(finalMemory.metadata || {}) };
                 // Always use LLM's fresh classification (don't check if metadata.memoryType exists)
                 metadata.memoryType = typedMemoryType;
                 return { ...rest, metadata };
@@ -479,7 +504,7 @@ export class ToolRuntime {
               return rest;
             }
 
-            return sanitizedMemory;
+            return finalMemory;
           });
 
           // SECURITY: Use context index, ignore LLM-provided index

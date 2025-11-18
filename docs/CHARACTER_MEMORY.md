@@ -84,6 +84,86 @@ We explicitly avoid perfect, lossless recall at the behavioral level because:
 
 The simulated brain docs (`docs/SIMULATED_BRAIN.md`) define how decay, interference, and reconsolidation work to create this controlled imperfection.
 
+## Backdating Memories for Historical Context
+
+When building character backgrounds from existing content (old blog posts, YouTube scripts, past projects), timestamps play a crucial role in creating authentic, temporally coherent memories.
+
+### Why Backdating Matters
+
+By default, all memories are created with today's timestamp. This causes incorrect priority calculations:
+
+- A script written 9 months ago gets full priority (0.8+) when it should have decayed to ~0.2
+- Historical memories don't feel temporally coherent with recent experiences
+- You can't accurately represent a character's learning history
+
+### How to Backdate Memories
+
+When calling the `memorize` tool with historical content, include the original creation date:
+
+**Example: YouTube creator with 100 old scripts**
+
+```
+memorize:
+  input: "Remember these YouTube scripts from February 2025"
+  files: ["scripts/ep01.md", "scripts/ep02.md"]
+  metadata:
+    timestamp: "2025-02-04T10:00:00Z"  # Original upload date
+```
+
+Each memory object can include its own timestamp (takes priority) or inherit from `defaultMetadata.timestamp`:
+
+```json
+{
+  "text": "Work-life balance tips from script 4",
+  "metadata": { "topic": "life", "importance": "high" },
+  "timestamp": "2025-02-04T10:00:00Z"
+}
+```
+
+### Timestamp Format
+
+Accept both ISO 8601 variants:
+
+- **Full datetime**: `"2025-02-04T10:00:00Z"` (most accurate)
+- **Date only**: `"2025-02-04"` (when time is unknown, defaults to midnight UTC)
+
+### Impact on Priority Decay
+
+The Memory MCP's priority formula for episodic memories weights recency at 40%:
+
+```
+Priority = (recency × 0.4) + (importance × 0.2) + (usage × 0.2) + (emotion × 0.2)
+```
+
+This means:
+
+- **New memory (today)**: Priority ≈ 0.6 (with high importance, no emotion or usage)
+- **Same memory dated 9 months ago**: Priority ≈ 0.2 (with high importance, no emotion or usage)
+
+This decay is **intentional**—episodic memories naturally become less salient over time, while core beliefs and patterns remain relevant.
+
+### Best Practices
+
+1. **Extract dates from content metadata** when available
+   - File modification dates
+   - Article publish dates
+   - Git commit timestamps
+   - Video upload dates
+
+2. **Use timestamp for historical integrity**
+   - Preserve temporal context of character's learning journey
+   - Allow realistic forgetting curves on old episodic memories
+   - Keep core identity memories (high importance) relevant regardless of age
+
+3. **Distinguish between `timestamp` and `metadata.date`**
+   - `timestamp`: Controls priority decay (storage/system time)
+   - `metadata.date`: Human-readable reference (for context)
+
+4. **Consolidate old content with refinement**
+   - Let 9-month-old episodic memories decay naturally
+   - Use `refine_memories` to consolidate them into patterns/beliefs if important
+   - This mimics human memory: details fade, but lessons persist
+
 ## Design Principles for Character-Builders
 
 When using this system to create AI characters:

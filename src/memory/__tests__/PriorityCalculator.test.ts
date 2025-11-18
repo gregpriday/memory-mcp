@@ -503,6 +503,34 @@ describe('computeTypeDependentPriority', () => {
       const expected = 0.4 * recency + 0.2 * importance + 0.2 * usage + 0.2 * emotion;
       expect(priority).toBeCloseTo(expected, 6);
     });
+
+    it('should decay episodic memory priority with age (9-month-old with high importance yields ~0.2 priority)', () => {
+      const nineMonthsAgo = new Date(now.getTime() - 270 * 24 * 60 * 60 * 1000); // ~9 months (270 days)
+      const memory = makeMemory({
+        content: {
+          text: 'YouTube script from February about work-life balance',
+          timestamp: nineMonthsAgo.toISOString(),
+        },
+        metadata: {
+          index: 'test',
+          memoryType: 'episodic',
+          importance: 'high',
+          dynamics: {
+            accessCount: 0,
+            initialPriority: 0.8,
+            currentPriority: 0.8,
+            createdAt: nineMonthsAgo.toISOString(),
+          },
+        },
+      });
+
+      const priority = computeTypeDependentPriority(memory, now);
+      // Episodic formula: 0.4 * recency + 0.2 * importance + 0.2 * usage + 0.2 * emotion
+      // With 9-month-old timestamp and high importance (1.0), should be ~0.2
+      expect(priority).toBeCloseTo(0.2, 1);
+      expect(priority).toBeGreaterThan(0.15);
+      expect(priority).toBeLessThan(0.25);
+    });
   });
 
   describe('semantic memory type', () => {
