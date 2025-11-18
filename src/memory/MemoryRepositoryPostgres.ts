@@ -18,6 +18,7 @@ import { MetadataValidator, ValidationError } from '../validators/MetadataValida
 import { MemorySearchError } from './MemorySearchError.js';
 import { debugLog } from '../utils/logger.js';
 import { parseFilterExpression, FilterParserError } from './postgres/FilterParser.js';
+import { formatRelativeTime } from '../utils/dateUtils.js';
 
 /**
  * MemoryRepositoryPostgres
@@ -950,6 +951,7 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
           id: record.id,
           content: record.content,
           score: matchingRow?.semantic_score,
+          age: formatRelativeTime(record.content.timestamp),
         };
 
         if (includeMetadata && record.metadata) {

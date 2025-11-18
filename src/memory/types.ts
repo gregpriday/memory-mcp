@@ -239,7 +239,13 @@ export interface RecallResult {
   status: 'ok' | 'error';
   index: string;
   answer?: string;
-  memories?: Array<{ id: string; text: string; score?: number; metadata?: MemoryMetadata }>;
+  memories?: Array<{
+    id: string;
+    text: string;
+    score?: number;
+    metadata?: MemoryMetadata;
+    age?: string;
+  }>;
   supportingMemories?: Array<{ id: string; score: number }>;
   error?: string;
   /** Status of the search operation (for distinguishing empty results from errors) */
@@ -317,6 +323,7 @@ export interface SearchResult {
   content: MemoryContent;
   metadata?: MemoryMetadata;
   score?: number;
+  age?: string; // Human-readable relative time (e.g., "3 days ago")
 }
 
 /**
