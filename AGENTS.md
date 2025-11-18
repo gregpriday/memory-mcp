@@ -23,7 +23,8 @@
 
 ## Testing Guidelines
 
-- No automated test suite yet; treat `npm run lint` and `npm run build` as the minimum validation gate.
+- The project uses Jest for unit/integration tests and tsx for targeted test suites; run `npm test`, `npm run lint`, and `npm run build` as the minimum validation gate.
+- Test commands: `npm test` (Jest suite), `npm run test:coverage` (coverage report), `npm run test:indexes`, `npm run test:memorize`, `npm run test:scan` (tsx-based targeted tests).
 - When adding tests, place them beside source files (`*.test.ts`) and wire them into npm scripts before merging.
 - Validate database-facing changes with `npm run migrate:verify` against a local Postgres instance.
 

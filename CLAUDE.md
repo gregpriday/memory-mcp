@@ -32,7 +32,17 @@ For high-level goals around the simulated brain and imperfect memory behavior, r
 
 ### Database
 
-Migrations must be run manually via `psql`:
+**Preferred method:** Use npm scripts that automatically resolve database URLs from your project configuration:
+
+```bash
+npm run migrate         # Run schema migrations
+npm run migrate:seed    # Load optional test data
+npm run migrate:verify  # Verify migration state
+```
+
+These scripts read from `config/projects.json` using your `MEMORY_ACTIVE_PROJECT` env var and are safer than manual commands.
+
+**Alternative:** Manual migration via `psql` (use only if npm scripts fail):
 
 ```bash
 psql "$DATABASE_URL" -f migrations/20250117000001_init_postgres_schema.sql

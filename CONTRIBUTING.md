@@ -212,13 +212,33 @@ config/           # JSON/TOML configuration files
 
 ## Testing Guidelines
 
-Currently, the project uses **build and lint as the minimum validation gate**:
+The project has an **automated test suite** using Jest for unit/integration tests and tsx for targeted tests. Run all validation checks before committing:
 
 ```bash
-# Run before committing
+# Run the full test suite
+npm test
+
+# Run with coverage report
+npm run test:coverage
+
+# Run specific targeted tests
+npm run test:indexes
+npm run test:memorize
+npm run test:scan
+
+# Also run linting and build
 npm run lint
 npm run build
 ```
+
+### Test File Organization
+
+When adding new tests:
+
+- Place test files beside source files (`*.test.ts`)
+- Wire tests into npm scripts before merging
+- Test with real PostgreSQL database (no mocks for repository layer)
+- Include integration tests for MCP tools
 
 ### Database Change Validation
 
@@ -230,18 +250,9 @@ npm run migrate:verify
 
 # Test against fresh database
 dropdb memory_default && createdb memory_default
-psql -d memory_default -f migrations/20250117000001_init_postgres_schema.sql
+npm run migrate
 npm run dev
 ```
-
-### Future Test Suite
-
-When adding automated tests:
-
-- Place test files beside source files (`*.test.ts`)
-- Wire tests into npm scripts before merging
-- Test with real PostgreSQL database (no mocks for repository layer)
-- Include integration tests for MCP tools
 
 ## Database Changes
 
