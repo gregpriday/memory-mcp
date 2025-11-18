@@ -29,8 +29,7 @@ The Memory MCP server is configured through environment variables. Here are the 
 **Required:**
 
 ```env
-# Backend configuration (Postgres-only stack)
-MEMORY_BACKEND=postgres
+# Postgres project configuration
 MEMORY_POSTGRES_PROJECT_REGISTRY=./config/projects.json
 MEMORY_ACTIVE_PROJECT=local
 
@@ -536,7 +535,6 @@ Add the Memory MCP server configuration:
       "env": {
         "OPENAI_API_KEY": "sk-your-api-key-here",
         "MEMORY_ACTIVE_PROJECT": "local",
-        "MEMORY_BACKEND": "postgres",
         "MEMORY_POSTGRES_PROJECT_REGISTRY": "/absolute/path/to/memory-mcp/config/projects.json",
         "MEMORY_EMBEDDING_MODEL": "text-embedding-3-small"
       }
@@ -964,7 +962,6 @@ LIMIT 10;
 
 | Variable                           | Required | Default                  | Description                           |
 | ---------------------------------- | -------- | ------------------------ | ------------------------------------- |
-| `MEMORY_BACKEND`                   | Yes      | `postgres`               | Backend type (always postgres)        |
 | `MEMORY_POSTGRES_PROJECT_REGISTRY` | Yes      | `./config/projects.json` | Path to projects config               |
 | `MEMORY_ACTIVE_PROJECT`            | Yes      | `local`                  | Active project key from registry      |
 | `OPENAI_API_KEY`                   | Yes      | -                        | OpenAI API key for embeddings         |

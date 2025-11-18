@@ -229,8 +229,7 @@ cp .env.example .env
 **Required Environment Variables:**
 
 ```env
-# Backend configuration (Postgres-only stack)
-MEMORY_BACKEND=postgres
+# Postgres project configuration
 MEMORY_POSTGRES_PROJECT_REGISTRY=./config/projects.json
 MEMORY_ACTIVE_PROJECT=local
 

@@ -84,7 +84,6 @@ Copy `.env.example` to `.env` and configure:
 
 ```env
 # Required
-MEMORY_BACKEND=postgres
 MEMORY_POSTGRES_PROJECT_REGISTRY=./config/projects.json
 MEMORY_ACTIVE_PROJECT=local
 OPENAI_API_KEY=sk-your-api-key-here

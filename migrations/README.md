@@ -217,7 +217,6 @@ Replace `username`, `password`, and database name with your actual credentials.
 cp .env.example .env
 
 # Edit .env to match your setup
-MEMORY_BACKEND=postgres
 MEMORY_POSTGRES_PROJECT_REGISTRY=./config/projects.json
 MEMORY_ACTIVE_PROJECT=local
 OPENAI_API_KEY=your_openai_api_key_here
