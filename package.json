@@ -17,6 +17,7 @@
     "test:coverage": "jest --runInBand --coverage",
     "test:indexes": "tsx --test tests/indexTools.test.ts",
     "test:memorize": "tsx --test tests/memorizeTools.test.ts",
+    "test:scan": "tsx --test tests/scanMemories.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

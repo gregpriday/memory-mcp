@@ -14,6 +14,8 @@ import type {
   ListIndexesResult,
   MemorizeToolArgs,
   MemorizeResult,
+  ScanMemoriesToolArgs,
+  ScanMemoriesResult,
 } from '../../src/memory/types.js';
 
 /**
@@ -165,6 +167,14 @@ export class TestServerHarness {
   async callMemorize(args: MemorizeToolArgs): Promise<MemorizeResult> {
     const mcpResponse = await this.controller.handleMemorizeTool(args);
     return this.parseJsonResponse<MemorizeResult>(mcpResponse);
+  }
+
+  /**
+   * Call scan_memories tool and return parsed result.
+   */
+  async callScanMemories(args: ScanMemoriesToolArgs): Promise<ScanMemoriesResult> {
+    const mcpResponse = await this.controller.handleScanMemoriesTool(args);
+    return this.parseJsonResponse<ScanMemoriesResult>(mcpResponse);
   }
 
   /**
