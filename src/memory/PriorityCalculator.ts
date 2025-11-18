@@ -32,7 +32,7 @@
  *
  * @public
  */
-import { MemoryRecord, MemoryDynamics, Importance, MemoryType, EmotionInfo } from './types.js';
+import { MemoryRecord, MemoryDynamics, Importance, EmotionInfo } from './types.js';
 
 /**
  * Calculate recency score using exponential decay with 30-day half-life.

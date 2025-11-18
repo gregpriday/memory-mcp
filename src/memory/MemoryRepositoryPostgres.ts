@@ -1,14 +1,12 @@
-import { Pool, QueryResult } from 'pg';
+import { Pool } from 'pg';
 import { randomUUID } from 'crypto';
 import type { EmbeddingService } from '../llm/EmbeddingService.js';
 import {
   MemoryRecord,
-  MemoryContent,
   MemoryMetadata,
   SearchResult,
   MemoryToUpsert,
   SearchDiagnostics,
-  SearchStatus,
   Importance,
   Relationship,
 } from './types.js';

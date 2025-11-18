@@ -1,4 +1,4 @@
-import { LLMClient, ChatMessage, ToolDef } from './LLMClient.js';
+import { LLMClient } from './LLMClient.js';
 import { PromptManager } from './PromptManager.js';
 import { IMemoryRepository } from '../memory/IMemoryRepository.js';
 import { ProjectFileLoader } from '../memory/ProjectFileLoader.js';
@@ -16,7 +16,6 @@ import {
   ListIndexesResult,
   RefineMemoriesResult,
   ScanMemoriesResult,
-  MemorizeDecision,
   MemoryToUpsert,
   RefinementAction,
   UpdateRefinementAction,
@@ -24,10 +23,8 @@ import {
   MergeRefinementAction,
   CreateRefinementAction,
   SearchResult,
-  MemoryRecord,
   SearchDiagnostics,
   SearchStatus,
-  MemoryType,
 } from '../memory/types.js';
 import { MemorySearchError } from '../memory/MemorySearchError.js';
 import { loadRefinementConfig } from '../config/refinement.js';
@@ -35,10 +32,7 @@ import { validateAction, ValidationContext } from '../validators/RefinementActio
 import { debugLogOperation, debugLog } from '../utils/logger.js';
 import {
   MemoryAgentConfig,
-  OperationLogEntry,
   RequestContext,
-  PreprocessedFileSummary,
-  VALID_MEMORY_TYPES,
   convertFiltersToExpression,
   hasUsableMetadataFilters,
   safeJsonParse,
@@ -233,7 +227,7 @@ export class MemoryAgent {
     const mergedResults = Array.from(mergedMap.values())
       .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
       .slice(0, limit)
-      .map(({ sourceQuery, ...rest }) => rest); // Remove sourceQuery from final results
+      .map(({ sourceQuery: _sourceQuery, ...rest }) => rest); // Remove sourceQuery from final results
 
     debugLog('query-expansion', 'Merged search results', {
       totalSearches: allQueries.length,
