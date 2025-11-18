@@ -17,11 +17,11 @@
 -- UP Migration
 -- =====================================================================
 
--- Add temporal columns to memories table
+-- Add temporal columns to memories table (without defaults first, to allow backfill)
 ALTER TABLE memories
-  ADD COLUMN valid_at TIMESTAMPTZ DEFAULT now(),
-  ADD COLUMN recorded_at TIMESTAMPTZ DEFAULT now(),
-  ADD COLUMN time_confidence REAL DEFAULT 1.0;
+  ADD COLUMN valid_at TIMESTAMPTZ,
+  ADD COLUMN recorded_at TIMESTAMPTZ,
+  ADD COLUMN time_confidence REAL;
 
 -- Add constraints for time_confidence
 ALTER TABLE memories
@@ -35,6 +35,12 @@ SET
   time_confidence = 1.0
 WHERE valid_at IS NULL;
 
+-- Add defaults for future inserts
+ALTER TABLE memories
+  ALTER COLUMN valid_at SET DEFAULT now(),
+  ALTER COLUMN recorded_at SET DEFAULT now(),
+  ALTER COLUMN time_confidence SET DEFAULT 1.0;
+
 -- Add BRIN index on valid_at for efficient temporal range queries
 -- BRIN is optimal for time-series data with natural insertion order
 CREATE INDEX idx_memories_valid_at ON memories USING BRIN (valid_at) WHERE valid_at IS NOT NULL;
@@ -46,11 +52,11 @@ COMMENT ON COLUMN memories.valid_at IS 'Narrative time: when this fact was "true
 COMMENT ON COLUMN memories.recorded_at IS 'System time: when we ingested/created this record (ISO 8601). Used for auditability.';
 COMMENT ON COLUMN memories.time_confidence IS 'Confidence level for valid_at timestamp (0.0-1.0). 1.0 = exact, 0.5 = estimated, 0.0 = uncertain.';
 
--- Add temporal columns to memory_relationships table
+-- Add temporal columns to memory_relationships table (without defaults first, to allow backfill)
 ALTER TABLE memory_relationships
-  ADD COLUMN valid_at TIMESTAMPTZ DEFAULT now(),
-  ADD COLUMN recorded_at TIMESTAMPTZ DEFAULT now(),
-  ADD COLUMN temporal_ok BOOLEAN DEFAULT TRUE,
+  ADD COLUMN valid_at TIMESTAMPTZ,
+  ADD COLUMN recorded_at TIMESTAMPTZ,
+  ADD COLUMN temporal_ok BOOLEAN,
   ADD COLUMN temporal_reason TEXT;
 
 -- Backfill temporal columns for existing relationships
@@ -64,6 +70,12 @@ SET
   recorded_at = mr.created_at,
   temporal_ok = TRUE
 WHERE mr.valid_at IS NULL;
+
+-- Add defaults for future inserts
+ALTER TABLE memory_relationships
+  ALTER COLUMN valid_at SET DEFAULT now(),
+  ALTER COLUMN recorded_at SET DEFAULT now(),
+  ALTER COLUMN temporal_ok SET DEFAULT TRUE;
 
 -- Add composite index for temporal relationship queries
 CREATE INDEX idx_memory_relationships_valid_at ON memory_relationships (valid_at DESC) WHERE valid_at IS NOT NULL;
