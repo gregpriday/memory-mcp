@@ -44,6 +44,8 @@ export class FakeLLMClient {
       const payload = this.parsePayload(userMessage?.content || '');
       const inputText = payload.instruction || 'Remember this single test memory';
       const indexName = payload.index || 'test-index';
+      // Use deterministic timestamp for testing (2025-02-04T10:00:00Z)
+      const deterministicTimestamp = '2025-02-04T10:00:00Z';
 
       return {
         responseId: 'fake-response-1',
@@ -63,11 +65,11 @@ export class FakeLLMClient {
                     importance: 'high',
                     memoryType: 'semantic',
                   },
+                  timestamp: deterministicTimestamp,
                 },
               ],
               defaultMetadata: payload.defaultMetadata || {
                 source: 'user',
-                timestamp: new Date().toISOString(),
               },
             }),
           },
