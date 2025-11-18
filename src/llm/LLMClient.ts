@@ -169,9 +169,8 @@ export class LLMClient {
         ...(options.jsonMode && { format: { type: 'json_object' } }),
       },
       ...(options.maxTokens && { max_output_tokens: options.maxTokens }),
-      ...(options.previousResponseId
-        ? { previous_response_id: options.previousResponseId }
-        : { input: this.toResponseInput(messages) }),
+      input: this.toResponseInput(messages),
+      ...(options.previousResponseId && { previous_response_id: options.previousResponseId }),
     };
 
     try {
