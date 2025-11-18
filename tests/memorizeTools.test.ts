@@ -327,5 +327,31 @@ describe('Memorize Tools Integration Tests', () => {
         '✓ Priority values in [0.0, 1.0] range (current)'
       );
     });
+
+    it('should pass previousResponseId between tool loop iterations (CoT persistence)', async () => {
+      const indexName = `${testIndexPrefix}${Date.now()}-cot`;
+      const inputText = 'Test CoT persistence';
+
+      // Reset the fake LLM client
+      fakeLLMClient.reset();
+
+      // Call memorize tool through controller
+      await harnessWithFakes.callMemorize({
+        input: inputText,
+        index: indexName,
+        metadata: {
+          source: 'test',
+        },
+        force: true,
+      });
+
+      // Verify that previousResponseId was passed on the second call
+      // First call returns fake-response-1, second call should receive it as previousResponseId
+      assert.strictEqual(
+        fakeLLMClient.lastPreviousResponseId,
+        'fake-response-1',
+        'Second LLM call should receive previousResponseId from first call'
+      );
+    });
   });
 });

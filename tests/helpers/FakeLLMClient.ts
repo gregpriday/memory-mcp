@@ -9,6 +9,7 @@ export class FakeLLMClient {
   private callCount = 0;
   private model: string;
   private analysisModel: string;
+  public lastPreviousResponseId?: string; // Track for testing CoT persistence
 
   constructor(model = 'fake-llm-model', analysisModel = 'fake-analysis-model') {
     this.model = model;
@@ -25,12 +26,16 @@ export class FakeLLMClient {
     tools: ToolDef[],
     _options: {
       model?: string;
-      temperature?: number;
       maxTokens?: number;
+      previousResponseId?: string;
+      reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
+      verbosity?: 'low' | 'medium' | 'high';
       jsonMode?: boolean;
     } = {}
   ): Promise<LLMResponse> {
     this.callCount++;
+    // Track previousResponseId for testing CoT persistence
+    this.lastPreviousResponseId = _options.previousResponseId;
 
     // First call: Agent decides to call upsert_memories tool
     if (this.callCount === 1) {
@@ -41,6 +46,7 @@ export class FakeLLMClient {
       const indexName = payload.index || 'test-index';
 
       return {
+        responseId: 'fake-response-1',
         content: null,
         finishReason: 'tool_calls',
         toolCalls: [
@@ -76,6 +82,7 @@ export class FakeLLMClient {
       const hasStoredMemory = toolResult && toolResult.content?.includes('memory_ids');
 
       return {
+        responseId: 'fake-response-2',
         content: JSON.stringify({
           decision: {
             action: 'STORED',
@@ -94,6 +101,7 @@ export class FakeLLMClient {
 
     // Fallback for unexpected additional calls
     return {
+      responseId: `fake-response-${this.callCount}`,
       content: JSON.stringify({
         decision: {
           action: 'ERROR',
@@ -115,8 +123,9 @@ export class FakeLLMClient {
     _userContent: string,
     _options: {
       model?: string;
-      temperature?: number;
       maxTokens?: number;
+      reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
+      verbosity?: 'low' | 'medium' | 'high';
     } = {}
   ): Promise<string> {
     // For file analysis in memorize operation, return empty memories
@@ -144,6 +153,7 @@ export class FakeLLMClient {
    */
   reset(): void {
     this.callCount = 0;
+    this.lastPreviousResponseId = undefined;
   }
 
   /**
