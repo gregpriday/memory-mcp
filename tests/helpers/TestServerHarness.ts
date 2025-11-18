@@ -14,6 +14,8 @@ import type {
   ListIndexesResult,
   MemorizeToolArgs,
   MemorizeResult,
+  ForgetToolArgs,
+  ForgetResult,
 } from '../../src/memory/types.js';
 
 /**
@@ -236,6 +238,50 @@ export class TestServerHarness {
       )`,
       [this.projectId, `${indexNamePrefix}%`]
     );
+  }
+
+  /**
+   * Call forget tool and return parsed result.
+   */
+  async callForget(args: ForgetToolArgs): Promise<ForgetResult> {
+    const mcpResponse = await this.controller.handleForgetTool(args);
+    return this.parseJsonResponse<ForgetResult>(mcpResponse);
+  }
+
+  /**
+   * Get relationships for a specific memory.
+   * Returns all relationships where the memory is either source or target.
+   */
+  async getRelationshipsForMemory(memoryId: string): Promise<
+    Array<{
+      source_id: string;
+      target_id: string;
+      relationship_type: string;
+      metadata: Record<string, unknown>;
+    }>
+  > {
+    const result = await this.pool.query(
+      `SELECT source_id, target_id, relationship_type, metadata
+       FROM memory_relationships
+       WHERE project = $1 AND (source_id = $2 OR target_id = $2)`,
+      [this.projectId, memoryId]
+    );
+
+    return result.rows;
+  }
+
+  /**
+   * Get count of relationships for a specific memory.
+   */
+  async getRelationshipCount(memoryId: string): Promise<number> {
+    const result = await this.pool.query(
+      `SELECT COUNT(*) as count
+       FROM memory_relationships
+       WHERE project = $1 AND (source_id = $2 OR target_id = $2)`,
+      [this.projectId, memoryId]
+    );
+
+    return parseInt(result.rows[0]?.count || '0', 10);
   }
 
   /**
