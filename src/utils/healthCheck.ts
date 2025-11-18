@@ -240,9 +240,8 @@ export async function checkDbConnection(client: pg.Client): Promise<HealthCheckR
     await client.query('SELECT 1 AS ok');
 
     // Extract user and database from client config
-    const dbName =
-      typeof client.database === 'string' ? client.database : client.connectionParameters?.database;
-    const user = typeof client.user === 'string' ? client.user : client.connectionParameters?.user;
+    const dbName = client.database;
+    const user = client.user;
 
     return ok('db:connection', 'Database connection', `Connected as ${user} to ${dbName}`);
   } catch (err) {
