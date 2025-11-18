@@ -16,6 +16,12 @@ import type {
   MemorizeResult,
   RefineMemoriesToolArgs,
   RefineMemoriesResult,
+  RecallToolArgs,
+  RecallResult,
+  ScanMemoriesToolArgs,
+  ScanMemoriesResult,
+  ForgetToolArgs,
+  ForgetResult,
 } from '../../src/memory/types.js';
 
 /**
@@ -178,6 +184,22 @@ export class TestServerHarness {
   }
 
   /**
+   * Call recall tool and return parsed result.
+   */
+  async callRecall(args: RecallToolArgs): Promise<RecallResult> {
+    const mcpResponse = await this.controller.handleRecallTool(args);
+    return this.parseJsonResponse<RecallResult>(mcpResponse);
+  }
+
+  /**
+   * Call scan_memories tool and return parsed result.
+   */
+  async callScanMemories(args: ScanMemoriesToolArgs): Promise<ScanMemoriesResult> {
+    const mcpResponse = await this.controller.handleScanMemoriesTool(args);
+    return this.parseJsonResponse<ScanMemoriesResult>(mcpResponse);
+  }
+
+  /**
    * Get a memory row from the database including all fields.
    */
   async getMemoryRow(memoryId: string): Promise<{
@@ -233,6 +255,25 @@ export class TestServerHarness {
   }
 
   /**
+   * Compute cosine similarity score for a memory against a query vector.
+   * Uses pgvector's <=> operator: 1 - (embedding <=> query_vector)
+   */
+  async computeCosineScore(memoryId: string, queryVector: number[]): Promise<number | null> {
+    const result = await this.pool.query(
+      `SELECT 1 - (embedding <=> $1::vector) AS score
+      FROM memories
+      WHERE project = $2 AND id = $3`,
+      [JSON.stringify(queryVector), this.projectId, memoryId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return result.rows[0].score;
+  }
+
+  /**
    * Clean up test memories.
    * Deletes all memories associated with test indexes (by name prefix).
    */
@@ -246,6 +287,50 @@ export class TestServerHarness {
       )`,
       [this.projectId, `${indexNamePrefix}%`]
     );
+  }
+
+  /**
+   * Call forget tool and return parsed result.
+   */
+  async callForget(args: ForgetToolArgs): Promise<ForgetResult> {
+    const mcpResponse = await this.controller.handleForgetTool(args);
+    return this.parseJsonResponse<ForgetResult>(mcpResponse);
+  }
+
+  /**
+   * Get relationships for a specific memory.
+   * Returns all relationships where the memory is either source or target.
+   */
+  async getRelationshipsForMemory(memoryId: string): Promise<
+    Array<{
+      source_id: string;
+      target_id: string;
+      relationship_type: string;
+      metadata: Record<string, unknown>;
+    }>
+  > {
+    const result = await this.pool.query(
+      `SELECT source_id, target_id, relationship_type, metadata
+       FROM memory_relationships
+       WHERE project = $1 AND (source_id = $2 OR target_id = $2)`,
+      [this.projectId, memoryId]
+    );
+
+    return result.rows;
+  }
+
+  /**
+   * Get count of relationships for a specific memory.
+   */
+  async getRelationshipCount(memoryId: string): Promise<number> {
+    const result = await this.pool.query(
+      `SELECT COUNT(*) as count
+       FROM memory_relationships
+       WHERE project = $1 AND (source_id = $2 OR target_id = $2)`,
+      [this.projectId, memoryId]
+    );
+
+    return parseInt(result.rows[0]?.count || '0', 10);
   }
 
   /**
