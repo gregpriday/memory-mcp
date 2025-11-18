@@ -6,6 +6,7 @@ import { MemoryToUpsert, MemoryType } from '../../../memory/types.js';
 import { RequestContext, OperationLogEntry, VALID_MEMORY_TYPES } from '../shared/index.js';
 import { safeJsonParse } from '../shared/utils.js';
 import { debugLog } from '../../../utils/logger.js';
+import { TimestampValidator } from '../../../validators/TimestampValidator.js';
 
 interface ToolRuntimeConfig {
   maxToolIterations?: number;
@@ -80,6 +81,7 @@ export interface ToolLoopLlmOptions {
 export class ToolRuntime {
   private maxToolIterations: number;
   private maxSearchIterations: number;
+  private timestampValidator: TimestampValidator;
 
   constructor(
     private llm: LLMClient,
@@ -90,6 +92,7 @@ export class ToolRuntime {
   ) {
     this.maxToolIterations = config.maxToolIterations ?? 10;
     this.maxSearchIterations = config.maxSearchIterations ?? 3;
+    this.timestampValidator = new TimestampValidator();
   }
 
   /**
@@ -462,29 +465,75 @@ export class ToolRuntime {
             }
           }
 
-          // Helper to validate ISO 8601 timestamp format
-          const isValidTimestamp = (ts: unknown): boolean => {
-            if (typeof ts !== 'string') return false;
-            // Accept both ISO 8601 full datetime and date-only formats
-            // Examples: "2025-02-04T10:00:00Z", "2025-02-04"
-            const isoRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})?)?$/;
-            if (!isoRegex.test(ts.trim())) return false;
-            // Verify the date is actually parseable
-            const parsed = new Date(ts);
-            return !Number.isNaN(parsed.getTime());
-          };
-
-          // Normalize memoryType: move from top-level to metadata if present
+          // Normalize and validate memoryType: move from top-level to metadata if present
           const normalizedMemories = cappedMemories.map((memory) => {
             // Sanitize null metadata to prevent downstream crashes
             const sanitizedMemory = memory.metadata === null ? { ...memory, metadata: {} } : memory;
 
             // Validate and preserve timestamp if present
             let finalMemory: MemoryToUpsert = sanitizedMemory;
-            if (sanitizedMemory.timestamp && !isValidTimestamp(sanitizedMemory.timestamp)) {
-              // Drop invalid timestamps to prevent errors downstream
-              const { timestamp: _ts, ...rest } = sanitizedMemory;
-              finalMemory = rest;
+            if (sanitizedMemory.timestamp !== undefined && sanitizedMemory.timestamp !== null) {
+              // Check that timestamp is a string
+              if (typeof sanitizedMemory.timestamp !== 'string') {
+                // Non-string timestamp - drop it and record error
+                const { timestamp: _ts, ...rest } = sanitizedMemory;
+                finalMemory = rest;
+                context.validationMessages.push({
+                  level: 'error',
+                  message: `Timestamp must be a string (got ${typeof sanitizedMemory.timestamp}). Timestamp dropped.`,
+                });
+                return finalMemory; // Skip further timestamp validation
+              }
+
+              // Handle empty string
+              if (sanitizedMemory.timestamp.trim() === '') {
+                const { timestamp: _ts, ...rest } = sanitizedMemory;
+                finalMemory = rest;
+                context.validationMessages.push({
+                  level: 'error',
+                  message: `Timestamp cannot be empty. Timestamp dropped.`,
+                });
+                return finalMemory; // Skip further validation
+              }
+
+              // Now we know it's a non-empty string - validate it
+              const memoryType = (sanitizedMemory.metadata?.memoryType ||
+                sanitizedMemory.memoryType) as MemoryType | undefined;
+              const validationResult = this.timestampValidator.validate(
+                sanitizedMemory.timestamp,
+                memoryType
+              );
+
+              if (!validationResult.valid) {
+                // Validation error: drop timestamp unless force bypass is enabled
+                if (!context.forceValidationBypass) {
+                  // Drop invalid timestamp
+                  const { timestamp: _ts, ...rest } = sanitizedMemory;
+                  finalMemory = rest;
+                  // Record error in context for user feedback
+                  context.validationMessages.push({
+                    level: 'error',
+                    message: `Timestamp validation failed: ${validationResult.error}. Use force: true to bypass.`,
+                  });
+                } else {
+                  // Force bypass: downgrade to warning and drop timestamp
+                  context.validationMessages.push({
+                    level: 'warning',
+                    message: `Timestamp validation: ${validationResult.error}. Storing without timestamp.`,
+                  });
+                  const { timestamp: _ts, ...rest } = sanitizedMemory;
+                  finalMemory = rest;
+                }
+              } else {
+                // Validation passed: use normalized timestamp
+                finalMemory = { ...sanitizedMemory, timestamp: validationResult.normalized };
+                if (validationResult.warning) {
+                  context.validationMessages.push({
+                    level: 'warning',
+                    message: validationResult.warning,
+                  });
+                }
+              }
             }
 
             // If memoryType exists at top level, validate and move to metadata

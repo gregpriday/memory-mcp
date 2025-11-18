@@ -358,6 +358,7 @@ export class MemoryAgent {
       trackedMemoryIds: new Set(),
       searchDiagnostics: [], // Initialize diagnostics array
       operationLog: [],
+      validationMessages: [],
     };
 
     try {
@@ -588,6 +589,7 @@ export class MemoryAgent {
       trackedMemoryIds: new Set(),
       searchDiagnostics: [],
       operationLog: [],
+      validationMessages: [],
       forgetContext: {
         dryRun: isDryRun,
         explicitMemoryIds: explicitIds,
@@ -1052,6 +1054,7 @@ export class MemoryAgent {
         trackedMemoryIds: new Set(),
         searchDiagnostics: [],
         operationLog: [],
+        validationMessages: [],
       };
 
       // Conditionally include consolidation-specific prompt for pattern extraction

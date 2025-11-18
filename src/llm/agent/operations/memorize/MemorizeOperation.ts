@@ -8,11 +8,13 @@ import {
   MemorizeDecision,
   MemoryToUpsert,
   MemoryMetadata,
+  MemoryType,
 } from '../../../../memory/types.js';
 import { ToolRuntime } from '../../runtime/ToolRuntime.js';
 import { MemoryAgentConfig, RequestContext, PreprocessedFileSummary } from '../../shared/index.js';
 import { safeJsonParse } from '../../shared/utils.js';
 import { debugLogOperation, debugLog } from '../../../../utils/logger.js';
+import { TimestampValidator } from '../../../../validators/TimestampValidator.js';
 
 interface MemorizeLLMResponse {
   decision?: Record<string, unknown>;
@@ -27,6 +29,7 @@ interface MemorizeLLMResponse {
  */
 export class MemorizeOperation {
   private ingestionConfig: Required<Omit<MemoryAgentConfig, 'projectId'>>;
+  private timestampValidator: TimestampValidator;
 
   constructor(
     private llm: LLMClient,
@@ -43,6 +46,7 @@ export class MemorizeOperation {
       maxChunksPerFile: config.maxChunksPerFile ?? 24,
       maxMemoriesPerFile: config.maxMemoriesPerFile ?? 50,
     };
+    this.timestampValidator = new TimestampValidator();
   }
 
   /**
@@ -79,7 +83,7 @@ export class MemorizeOperation {
   /**
    * Parse analyzer output into MemoryToUpsert entries
    */
-  private parseAnalyzerOutput(raw: string): MemoryToUpsert[] {
+  private parseAnalyzerOutput(raw: string, context?: RequestContext): MemoryToUpsert[] {
     try {
       const parsed = JSON.parse(raw);
       if (!parsed || !Array.isArray(parsed.memories)) {
@@ -114,19 +118,44 @@ export class MemorizeOperation {
             metadata.memoryType = candidate.memoryType as MemoryMetadata['memoryType'];
           }
 
-          // Preserve timestamp for backdating memories (validate ISO 8601 format)
-          const isValidTimestampFormat = (ts: unknown): boolean => {
-            if (typeof ts !== 'string') return false;
-            const isoRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})?)?$/;
-            if (!isoRegex.test(ts.trim())) return false;
-            const parsed = new Date(ts);
-            return !Number.isNaN(parsed.getTime());
-          };
+          // Validate and preserve timestamp for backdating memories
+          let timestamp: string | undefined;
+          if (typeof candidate.timestamp === 'string') {
+            const memoryType = (metadata.memoryType || candidate.memoryType) as
+              | MemoryType
+              | undefined;
+            const validationResult = this.timestampValidator.validate(
+              candidate.timestamp,
+              memoryType
+            );
 
-          const timestamp =
-            typeof candidate.timestamp === 'string' && isValidTimestampFormat(candidate.timestamp)
-              ? candidate.timestamp
-              : undefined;
+            if (!validationResult.valid) {
+              // Validation error
+              if (context?.forceValidationBypass) {
+                // Downgrade to warning - timestamp will be omitted and repository will use current time
+                context.validationMessages.push({
+                  level: 'warning',
+                  message: `Timestamp validation: ${validationResult.error}. Storing without explicit timestamp (will use current time).`,
+                });
+              } else {
+                // Error: reject this memory
+                context?.validationMessages.push({
+                  level: 'error',
+                  message: `Timestamp validation failed: ${validationResult.error}. Use force: true to bypass.`,
+                });
+                return null;
+              }
+            } else {
+              // Validation passed
+              timestamp = validationResult.normalized;
+              if (validationResult.warning && context) {
+                context.validationMessages.push({
+                  level: 'warning',
+                  message: validationResult.warning,
+                });
+              }
+            }
+          }
 
           return {
             text,
@@ -146,7 +175,8 @@ export class MemorizeOperation {
    */
   private async analyzeChunk(
     chunk: string,
-    contextMetadata: Record<string, unknown>
+    contextMetadata: Record<string, unknown>,
+    context?: RequestContext
   ): Promise<MemoryToUpsert[]> {
     const systemPrompt = this.prompts.composePrompt([
       'memory-analyzer',
@@ -165,7 +195,7 @@ export class MemorizeOperation {
       maxTokens: 2048,
     });
 
-    return this.parseAnalyzerOutput(analysis);
+    return this.parseAnalyzerOutput(analysis, context);
   }
 
   /**
@@ -214,11 +244,15 @@ export class MemorizeOperation {
         byteSize,
       };
 
-      const analyzedMemories = await this.analyzeChunk(chunk, {
-        ...chunkContext,
-        index,
-        defaultMetadata,
-      });
+      const analyzedMemories = await this.analyzeChunk(
+        chunk,
+        {
+          ...chunkContext,
+          index,
+          defaultMetadata,
+        },
+        context
+      );
 
       if (!analyzedMemories.length) {
         continue;
@@ -531,6 +565,8 @@ export class MemorizeOperation {
       trackedMemoryIds: new Set(),
       searchDiagnostics: [],
       operationLog: [],
+      forceValidationBypass: args.force || false,
+      validationMessages: [],
     };
 
     try {
@@ -615,8 +651,21 @@ export class MemorizeOperation {
         }
       }
 
-      // Combine with preprocessing notes
-      const allNotes = [...preprocessNotes, finalNotes].filter(Boolean).join('\n\n');
+      // Add validation messages if any
+      const validationNotes =
+        context.validationMessages.length > 0
+          ? context.validationMessages
+              .map(
+                (msg) =>
+                  `${msg.level === 'error' ? '❌' : '⚠️'} ${msg.level === 'error' ? 'Error' : 'Warning'}: ${msg.message}`
+              )
+              .join('\n')
+          : '';
+
+      // Combine all notes
+      const allNotes = [...preprocessNotes, finalNotes, validationNotes]
+        .filter(Boolean)
+        .join('\n\n');
 
       // Log warning when zero storage occurs
       if (storedCount === 0) {

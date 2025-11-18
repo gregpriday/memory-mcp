@@ -38,6 +38,14 @@ export interface OperationLogEntry {
 }
 
 /**
+ * Validation message that accumulates during timestamp/metadata validation
+ */
+export interface ValidationMessage {
+  level: 'warning' | 'error';
+  message: string;
+}
+
+/**
  * Request context for thread-safe operation execution
  */
 export interface RequestContext {
@@ -53,6 +61,9 @@ export interface RequestContext {
     explicitMemoryIds?: string[];
     hasMetadataFilters?: boolean;
   };
+  // Validation fields (for timestamp and metadata validation)
+  forceValidationBypass?: boolean; // When true, downgrade validation errors to warnings and continue
+  validationMessages: ValidationMessage[]; // Accumulate warnings and errors from validation
 }
 
 /**
