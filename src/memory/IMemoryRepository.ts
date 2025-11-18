@@ -37,6 +37,7 @@ export interface IndexSummary {
   name: string;
   documentCount: number;
   pendingDocumentCount: number;
+  description?: string;
 }
 
 /**
