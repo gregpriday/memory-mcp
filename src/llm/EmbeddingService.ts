@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import type { EmbeddingCreateParams } from 'openai/resources/embeddings';
+import { debugLog } from '../utils/logger.js';
 
 /**
  * EmbeddingService
@@ -29,6 +29,12 @@ export class EmbeddingService {
    * @throws Error if API request fails or dimensions don't match
    */
   async embedText(text: string): Promise<number[]> {
+    debugLog('repository', 'Generating embedding (single text)', {
+      count: 1,
+      model: this.model,
+      dimensions: this.expectedDimensions,
+    });
+
     try {
       const response = await this.openai.embeddings.create({
         model: this.model,
@@ -52,6 +58,11 @@ export class EmbeddingService {
       if (error instanceof Error && error.message.includes('dimension mismatch')) {
         throw error; // Re-throw dimension errors as-is
       }
+      debugLog('repository', 'Embedding request failed (single text)', {
+        model: this.model,
+        dimensions: this.expectedDimensions,
+        error: (error as Error).message,
+      });
       console.error('Embedding API error:', error);
       throw new Error(`Embedding request failed: ${(error as Error).message}`);
     }
@@ -78,6 +89,12 @@ export class EmbeddingService {
       );
     }
 
+    debugLog('repository', 'Generating embeddings', {
+      count: texts.length,
+      model: this.model,
+      dimensions: this.expectedDimensions,
+    });
+
     try {
       const response = await this.openai.embeddings.create({
         model: this.model,
@@ -103,6 +120,12 @@ export class EmbeddingService {
       if (error instanceof Error && error.message.includes('dimension mismatch')) {
         throw error; // Re-throw dimension errors as-is
       }
+      debugLog('repository', 'Embedding request failed (batch)', {
+        count: texts.length,
+        model: this.model,
+        dimensions: this.expectedDimensions,
+        error: (error as Error).message,
+      });
       console.error('Embedding API error:', error);
       throw new Error(`Batch embedding request failed: ${(error as Error).message}`);
     }

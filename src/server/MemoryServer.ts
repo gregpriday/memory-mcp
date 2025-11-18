@@ -104,6 +104,14 @@ export function createMemoryServer(config?: {
     embeddingService
   );
 
+  // Log configuration summary at startup
+  console.error(
+    `[Memory MCP] Configuration: ` +
+      `embedding=${embeddingConfig.model} (${embeddingConfig.dimensions}d), ` +
+      `project=${backend.activeProject.projectId}, ` +
+      `model=${process.env.MEMORY_MODEL || 'gpt-5-mini'}`
+  );
+
   const agent = new MemoryAgent(llmClient, promptManager, repository, fileLoader, {
     largeFileThresholdBytes: getEnvInt('MEMORY_LARGE_FILE_THRESHOLD_BYTES', 256 * 1024),
     chunkSizeChars: getEnvInt('MEMORY_CHUNK_CHAR_LENGTH', 16_000),

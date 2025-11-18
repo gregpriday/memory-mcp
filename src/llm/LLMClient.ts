@@ -3,6 +3,7 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
 } from 'openai/resources/chat/completions';
+import { debugLog } from '../utils/logger.js';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -140,10 +141,22 @@ export class LLMClient {
     }
 
     try {
+      debugLog('operation', 'LLM request', {
+        model,
+        messageCount: messages.length,
+        toolCount: tools.length,
+      });
+
       const response = await this.openai.chat.completions.create(completionOptions);
 
       const choice = response.choices[0];
       const message = choice.message;
+
+      debugLog('operation', 'LLM response', {
+        finishReason: choice.finish_reason,
+        toolCallCount: message.tool_calls?.length || 0,
+        hasContent: !!message.content,
+      });
 
       return {
         content: message.content,
@@ -199,10 +212,25 @@ export class LLMClient {
     }
 
     try {
+      debugLog('operation', 'LLM request (simple chat)', {
+        model,
+        messageCount: 2, // system + user
+        toolCount: 0,
+      });
+
       const response = await this.openai.chat.completions.create(completionOptions);
+
+      debugLog('operation', 'LLM response (simple chat)', {
+        finishReason: response.choices[0].finish_reason,
+        hasContent: !!response.choices[0].message.content,
+      });
 
       return response.choices[0].message.content || '';
     } catch (error) {
+      debugLog('operation', 'LLM request failed (simple chat)', {
+        model,
+        error: (error as Error).message,
+      });
       console.error('LLM API error:', error);
       throw new Error(`LLM request failed: ${(error as Error).message}`);
     }

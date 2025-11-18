@@ -5,6 +5,7 @@ import { ProjectFileLoader } from '../../../memory/ProjectFileLoader.js';
 import { MemoryToUpsert, MemoryType } from '../../../memory/types.js';
 import { RequestContext, OperationLogEntry, VALID_MEMORY_TYPES } from '../shared/index.js';
 import { safeJsonParse } from '../shared/utils.js';
+import { debugLog } from '../../../utils/logger.js';
 
 interface ToolRuntimeConfig {
   maxToolIterations?: number;
@@ -327,6 +328,13 @@ export class ToolRuntime {
     args: Record<string, unknown>,
     context: RequestContext
   ): Promise<string> {
+    // Log tool execution with metadata (avoid logging full payloads to prevent data leaks)
+    debugLog('operation', `Tool call: ${toolName}`, {
+      argKeys: Object.keys(args),
+      index: context.index,
+      mode: context.operationMode,
+    });
+
     try {
       switch (toolName) {
         case 'search_memories': {
@@ -555,6 +563,7 @@ export class ToolRuntime {
           throw new Error(`Unknown tool: ${toolName}`);
       }
     } catch (error) {
+      debugLog('operation', `Tool call failed: ${toolName}`, { error });
       return JSON.stringify({
         error: (error as Error).message,
       });
