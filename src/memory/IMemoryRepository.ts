@@ -420,4 +420,113 @@ export interface IMemoryRepository {
    * ```
    */
   listIndexes(): Promise<IndexSummary[]>;
+
+  /**
+   * Get memories related to a root memory through multi-hop relationship traversal.
+   *
+   * Performs graph traversal starting from a root memory, following relationships
+   * up to a specified depth. Uses recursive CTEs for efficient multi-hop navigation.
+   *
+   * @param indexName - Index containing the memories
+   * @param rootId - Starting memory ID for traversal
+   * @param options - Traversal options (depth, relationship types, direction)
+   * @param options.maxDepth - Maximum traversal depth (default: 3, max: 10 to prevent runaway queries)
+   * @param options.relationshipTypes - Filter by specific relationship types (undefined = all types)
+   * @param options.direction - Traversal direction: 'forward' (outgoing), 'backward' (incoming), 'both' (default: 'forward')
+   * @param options.limit - Maximum number of related memories to return (default: 100)
+   * @returns Array of related memory records with relationship metadata
+   *
+   * @remarks
+   * - Traversal stops at maxDepth or when no more relationships are found
+   * - Results include all memories within maxDepth hops, not just leaf nodes
+   * - Relationship cycles are automatically detected and prevented
+   * - Use 'backward' direction to find memories that reference the root
+   * - Use 'both' direction for undirected graph traversal
+   *
+   * @example
+   * ```typescript
+   * // Find all memories within 2 hops of a root memory
+   * const related = await repo.getRelatedMemories('knowledge', 'root-id', {
+   *   maxDepth: 2,
+   *   direction: 'forward'
+   * });
+   *
+   * // Find memories that support or contradict a belief
+   * const evidence = await repo.getRelatedMemories('beliefs', 'belief-id', {
+   *   relationshipTypes: ['supports', 'contradicts'],
+   *   direction: 'backward',
+   *   maxDepth: 3
+   * });
+   * ```
+   */
+  getRelatedMemories(
+    indexName: string,
+    rootId: string,
+    options?: {
+      maxDepth?: number;
+      relationshipTypes?: string[];
+      direction?: 'forward' | 'backward' | 'both';
+      limit?: number;
+    }
+  ): Promise<MemoryRecord[]>;
+
+  /**
+   * Find the shortest relationship path between two memories.
+   *
+   * Discovers the shortest path of relationships connecting a source memory
+   * to a target memory. Uses bidirectional search for efficiency.
+   *
+   * @param indexName - Index containing the memories
+   * @param sourceId - Starting memory ID
+   * @param targetId - Destination memory ID
+   * @param options - Path finding options
+   * @param options.maxDepth - Maximum path length to search (default: 5, max: 10)
+   * @param options.relationshipTypes - Limit to specific relationship types (undefined = all types)
+   * @returns Array of relationships forming the shortest path, or empty array if no path exists
+   *
+   * @remarks
+   * - Returns empty array if source and target are not connected within maxDepth
+   * - Path includes intermediate relationships in order from source to target
+   * - Uses bidirectional BFS for optimal performance on large graphs
+   * - Each relationship includes type, source, target, and optional metadata
+   *
+   * @example
+   * ```typescript
+   * // Find path between two memories
+   * const path = await repo.findRelationshipPath('knowledge', 'source-id', 'target-id', {
+   *   maxDepth: 5
+   * });
+   *
+   * if (path.length > 0) {
+   *   console.log(`Found path with ${path.length} hops:`);
+   *   path.forEach((rel, i) => {
+   *     console.log(`  ${i + 1}. ${rel.type}: ${rel.sourceId} → ${rel.targetId}`);
+   *   });
+   * } else {
+   *   console.log('No path found within max depth');
+   * }
+   *
+   * // Find path through specific relationship types only
+   * const summaryPath = await repo.findRelationshipPath('docs', 'detail-id', 'summary-id', {
+   *   relationshipTypes: ['summarizes', 'is_generalization_of'],
+   *   maxDepth: 3
+   * });
+   * ```
+   */
+  findRelationshipPath(
+    indexName: string,
+    sourceId: string,
+    targetId: string,
+    options?: {
+      maxDepth?: number;
+      relationshipTypes?: string[];
+    }
+  ): Promise<
+    Array<{
+      sourceId: string;
+      targetId: string;
+      type: string;
+      metadata?: Record<string, unknown>;
+    }>
+  >;
 }

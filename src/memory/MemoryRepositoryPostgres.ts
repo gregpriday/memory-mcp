@@ -22,6 +22,33 @@ import { formatRelativeTime } from '../utils/dateUtils.js';
 import { loadLoggingConfig } from '../config/logging.js';
 
 /**
+ * Type for database row with lifecycle columns
+ * Used internally for hydrating metadata from denormalized columns
+ */
+interface MemoryRow {
+  metadata: MemoryMetadata | null;
+  memory_type?: string;
+  topic?: string | null;
+  importance?: number;
+  tags?: string[];
+  source?: string | null;
+  source_path?: string | null;
+  channel?: string | null;
+  initial_priority: number;
+  current_priority: number;
+  created_at: Date;
+  updated_at?: Date;
+  last_accessed_at?: Date | null;
+  access_count: number;
+  max_access_count?: number;
+  stability?: string | null;
+  sleep_cycles?: number;
+  kind?: string | null;
+  derived_from_ids?: string[] | null;
+  superseded_by_id?: string | null;
+}
+
+/**
  * MemoryRepositoryPostgres
  * Postgres implementation of IMemoryRepository using pgvector for semantic search
  *
@@ -136,6 +163,48 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       default:
         return 'low';
     }
+  }
+
+  /**
+   * Hydrate metadata with dynamics from denormalized columns.
+   * This is the single source of truth for dynamics - they are NOT stored in JSONB.
+   *
+   * @param row - Database row with both metadata JSONB and denormalized columns
+   * @returns Complete MemoryMetadata with dynamics populated from columns
+   */
+  private hydrateMetadata(row: MemoryRow): MemoryMetadata {
+    // Start with JSONB metadata (excludes dynamics)
+    const metadata: MemoryMetadata = row.metadata || { index: '' };
+
+    // Overlay denormalized columns (source of truth)
+    if (row.memory_type) metadata.memoryType = row.memory_type as MemoryType;
+    if (row.topic !== undefined) metadata.topic = row.topic || undefined;
+    if (row.importance !== undefined) metadata.importance = this.numberToImportance(row.importance);
+    if (row.tags) metadata.tags = row.tags;
+    if (row.source) metadata.source = row.source as 'user' | 'file' | 'system';
+    if (row.source_path !== undefined) metadata.sourcePath = row.source_path || undefined;
+    if (row.channel !== undefined) metadata.channel = row.channel || undefined;
+    if (row.kind) metadata.kind = row.kind as 'raw' | 'summary' | 'derived';
+    if (row.derived_from_ids !== undefined) {
+      metadata.derivedFromIds = row.derived_from_ids || undefined;
+    }
+    if (row.superseded_by_id !== undefined) {
+      metadata.supersededById = row.superseded_by_id || undefined;
+    }
+
+    // Construct dynamics from lifecycle columns (single source of truth)
+    metadata.dynamics = {
+      initialPriority: row.initial_priority,
+      currentPriority: row.current_priority,
+      createdAt: row.created_at.toISOString(),
+      lastAccessedAt: row.last_accessed_at?.toISOString(),
+      accessCount: row.access_count,
+      maxAccessCount: row.max_access_count || 0,
+      stability: (row.stability as 'tentative' | 'stable' | 'canonical') || 'tentative',
+      sleepCycles: row.sleep_cycles || 0,
+    };
+
+    return metadata;
   }
 
   /**
@@ -295,8 +364,10 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
         };
       }
 
-      // Store full metadata including dynamics in JSONB
-      const metadataJson = { ...fullMetadata, dynamics };
+      // Store metadata in JSONB (excluding dynamics which live in denormalized columns)
+      // Remove dynamics if present to prevent drift between JSONB and columns
+      const { dynamics: _, ...metadataWithoutDynamics } = fullMetadata;
+      const metadataJson = metadataWithoutDynamics;
 
       // Extract denormalized columns
       const importance = this.importanceToNumber(fullMetadata.importance);
@@ -659,7 +730,6 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       const currentMetadata: MemoryMetadata = row.metadata ?? {
         index: indexName,
       };
-      const currentDynamics = currentMetadata.dynamics || {};
 
       // Increment access count (use column values as source of truth)
       const newAccessCount = (row.access_count || 0) + 1;
@@ -676,7 +746,9 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
           ...currentMetadata,
           memoryType: row.memory_type as MemoryMetadata['memoryType'],
           dynamics: {
-            ...currentDynamics,
+            initialPriority: 0, // not used in priority calculation
+            currentPriority: 0, // recalculated below
+            createdAt: row.created_at.toISOString(),
             accessCount: newAccessCount,
             maxAccessCount: newMaxAccessCount,
             lastAccessedAt: now.toISOString(),
@@ -687,7 +759,8 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       // Recalculate priority using PriorityCalculator
       const newPriority = computeTypeDependentPriority(tempMemory, now);
 
-      // Update the memory with new access stats and recalculated priority
+      // Update only denormalized columns (no JSONB sync needed)
+      // Dynamics will be hydrated from columns at read time
       const updateQuery = `
         UPDATE memories
         SET
@@ -695,27 +768,6 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
           access_count = $2,
           max_access_count = $3,
           current_priority = $4,
-          metadata = jsonb_set(
-            jsonb_set(
-              jsonb_set(
-                jsonb_set(
-                  COALESCE(metadata, '{}'::jsonb),
-                  '{dynamics,lastAccessedAt}',
-                  to_jsonb($1::text),
-                  true
-                ),
-                '{dynamics,accessCount}',
-                to_jsonb($2),
-                true
-              ),
-              '{dynamics,maxAccessCount}',
-              to_jsonb($3),
-              true
-            ),
-            '{dynamics,currentPriority}',
-            to_jsonb($4),
-            true
-          ),
           updated_at = $1
         WHERE id = $5
           AND index_id = $6
@@ -924,13 +976,31 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       const queryEmbedding = await this.embeddingService.embedText(query);
 
       // Build search query with vector similarity and optional keyword matching
-      // For now, we'll implement pure vector search (keyword search can be added later)
+      // Select all columns needed for metadata hydration
       let searchQuery = `
         SELECT
           id,
           content,
           metadata,
+          memory_type,
+          topic,
+          importance,
+          tags,
+          source,
+          source_path,
+          channel,
+          initial_priority,
+          current_priority,
           created_at,
+          updated_at,
+          last_accessed_at,
+          access_count,
+          max_access_count,
+          stability,
+          sleep_cycles,
+          kind,
+          derived_from_ids,
+          superseded_by_id,
           1 - (embedding <=> $1::vector) AS semantic_score
         FROM memories
         WHERE index_id = $2
@@ -972,22 +1042,22 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       searchQuery += ` ORDER BY semantic_score DESC LIMIT $${params.length + 1}`;
       params.push(limit);
 
-      const result = await this.runQuery<{
-        id: string;
-        content: string;
-        metadata: MemoryMetadata | null;
-        created_at: Date;
-        semantic_score: number;
-      }>('vector-search', searchQuery, params);
+      const result = await this.runQuery<
+        MemoryRow & {
+          semantic_score: number;
+          content: string;
+          id: string;
+        }
+      >('vector-search', searchQuery, params);
 
-      // Convert to SearchResult format
+      // Convert to SearchResult format with hydrated metadata
       const memoryRecords: MemoryRecord[] = result.rows.map((row) => ({
         id: row.id,
         content: {
           text: row.content,
           timestamp: row.created_at.toISOString(),
         },
-        metadata: row.metadata ?? { index: indexName },
+        metadata: this.hydrateMetadata(row),
       }));
 
       // Populate relationships from memory_relationships table
@@ -1120,13 +1190,12 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
     const indexId = indexResult.rows[0].id;
 
-    const result = await this.pool.query<{
-      id: string;
-      content: string;
-      created_at: Date;
-      metadata: MemoryMetadata | null;
-    }>(
-      `SELECT id, content, created_at, metadata
+    const result = await this.pool.query<MemoryRow & { content: string; id: string }>(
+      `SELECT id, content, created_at, metadata,
+              memory_type, topic, importance, tags, source, source_path, channel,
+              initial_priority, current_priority, updated_at, last_accessed_at,
+              access_count, max_access_count, stability, sleep_cycles,
+              kind, derived_from_ids, superseded_by_id
        FROM memories
        WHERE index_id = $1
          AND project = $2
@@ -1145,7 +1214,7 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
         text: row.content,
         timestamp: row.created_at.toISOString(),
       },
-      metadata: row.metadata ?? { index: indexName },
+      metadata: this.hydrateMetadata(row),
     };
 
     // Populate relationships from memory_relationships table
@@ -1179,13 +1248,12 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
     const indexId = indexResult.rows[0].id;
 
-    const result = await this.pool.query<{
-      id: string;
-      content: string;
-      created_at: Date;
-      metadata: MemoryMetadata | null;
-    }>(
-      `SELECT id, content, created_at, metadata
+    const result = await this.pool.query<MemoryRow & { content: string; id: string }>(
+      `SELECT id, content, created_at, metadata,
+              memory_type, topic, importance, tags, source, source_path, channel,
+              initial_priority, current_priority, updated_at, last_accessed_at,
+              access_count, max_access_count, stability, sleep_cycles,
+              kind, derived_from_ids, superseded_by_id
        FROM memories
        WHERE index_id = $1
          AND project = $2
@@ -1199,7 +1267,7 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
         text: row.content,
         timestamp: row.created_at.toISOString(),
       },
-      metadata: row.metadata ?? { index: indexName },
+      metadata: this.hydrateMetadata(row),
     }));
 
     // Populate relationships from memory_relationships table
@@ -1233,6 +1301,196 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
   /**
    * Get database-level information including per-index statistics.
    */
+  async getRelatedMemories(
+    indexName: string,
+    rootId: string,
+    options?: {
+      maxDepth?: number;
+      relationshipTypes?: string[];
+      direction?: 'forward' | 'backward' | 'both';
+      limit?: number;
+    }
+  ): Promise<MemoryRecord[]> {
+    const maxDepth = Math.min(Math.max(options?.maxDepth ?? 3, 1), 10);
+    const limit = Math.max(options?.limit ?? 100, 1);
+    const direction = options?.direction ?? 'forward';
+    const relationshipTypes = options?.relationshipTypes
+      ?.map((type) => type.trim())
+      .filter((type) => type.length > 0);
+
+    if (direction !== 'forward' && direction !== 'backward' && direction !== 'both') {
+      throw new Error(`Invalid traversal direction: ${direction}`);
+    }
+
+    const indexResult = await this.pool.query<{ id: string }>(
+      'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
+      [this.projectId, indexName]
+    );
+
+    if (indexResult.rows.length === 0) {
+      return [];
+    }
+
+    const indexId = indexResult.rows[0].id;
+    const params: unknown[] = [];
+    const addParam = (value: unknown) => {
+      params.push(value);
+      return `$${params.length}`;
+    };
+
+    const projectParam = addParam(this.projectId);
+    const indexParam = addParam(indexId);
+    const rootParam = addParam(rootId);
+
+    let relationshipFilterClause = '';
+    if (relationshipTypes && relationshipTypes.length > 0) {
+      const relationshipParam = addParam(relationshipTypes);
+      relationshipFilterClause = ` AND relationship_type = ANY(${relationshipParam}::text[])`;
+    }
+
+    const maxDepthParam = addParam(maxDepth);
+    const limitParam = addParam(limit);
+
+    let edgesCte = '';
+    switch (direction) {
+      case 'forward':
+        edgesCte = `
+  edges AS (
+    SELECT source_id, target_id, relationship_type, confidence
+    FROM memory_relationships
+    WHERE project = ${projectParam}
+      AND index_id = ${indexParam}
+      ${relationshipFilterClause}
+  ),`;
+        break;
+      case 'backward':
+        edgesCte = `
+  edges AS (
+    SELECT target_id AS source_id, source_id AS target_id, relationship_type, confidence
+    FROM memory_relationships
+    WHERE project = ${projectParam}
+      AND index_id = ${indexParam}
+      ${relationshipFilterClause}
+  ),`;
+        break;
+      case 'both':
+        edgesCte = `
+  edges AS (
+    SELECT source_id, target_id, relationship_type, confidence
+    FROM memory_relationships
+    WHERE project = ${projectParam}
+      AND index_id = ${indexParam}
+      ${relationshipFilterClause}
+    UNION ALL
+    SELECT target_id AS source_id, source_id AS target_id, relationship_type, confidence
+    FROM memory_relationships
+    WHERE project = ${projectParam}
+      AND index_id = ${indexParam}
+      ${relationshipFilterClause}
+  ),`;
+        break;
+    }
+
+    const query = `
+      WITH RECURSIVE
+      ${edgesCte}
+      traversal AS (
+        SELECT
+          e.target_id AS memory_id,
+          e.relationship_type,
+          e.confidence,
+          1 AS depth,
+          ARRAY[${rootParam}::text, e.target_id] AS path
+        FROM edges e
+        WHERE e.source_id = ${rootParam}
+
+        UNION ALL
+
+        SELECT
+          e.target_id,
+          e.relationship_type,
+          e.confidence,
+          t.depth + 1 AS depth,
+          t.path || e.target_id
+        FROM edges e
+        INNER JOIN traversal t ON e.source_id = t.memory_id
+        WHERE t.depth < ${maxDepthParam}
+          AND NOT e.target_id = ANY(t.path)
+      )
+      SELECT ranked.*
+      FROM (
+        SELECT DISTINCT ON (t.memory_id)
+          m.id,
+          m.content,
+          m.created_at,
+          m.metadata,
+          m.memory_type,
+          m.topic,
+          m.importance,
+          m.tags,
+          m.source,
+          m.source_path,
+          m.channel,
+          m.initial_priority,
+          m.current_priority,
+          m.updated_at,
+          m.last_accessed_at,
+          m.access_count,
+          m.max_access_count,
+          m.stability,
+          m.sleep_cycles,
+          m.kind,
+          m.derived_from_ids,
+          m.superseded_by_id,
+          t.depth,
+          t.relationship_type,
+          t.confidence
+        FROM traversal t
+        INNER JOIN memories m
+          ON m.id = t.memory_id
+         AND m.index_id = ${indexParam}
+         AND m.project = ${projectParam}
+        ORDER BY t.memory_id, t.depth
+      ) ranked
+      ORDER BY ranked.depth, ranked.id
+      LIMIT ${limitParam}
+    `;
+
+    type RelatedMemoryRow = MemoryRow & {
+      id: string;
+      content: string;
+      depth: number;
+      relationship_type?: string;
+      confidence?: number;
+    };
+
+    const result = await this.runQuery<RelatedMemoryRow>('get-related-memories', query, params);
+
+    const memories: MemoryRecord[] = result.rows.map((row) => ({
+      id: row.id,
+      content: {
+        text: row.content,
+        timestamp: row.created_at.toISOString(),
+      },
+      metadata: this.hydrateMetadata(row),
+    }));
+
+    await this.populateRelationships(memories);
+
+    const memoryIds = memories.map((memory) => memory.id);
+    if (memoryIds.length > 0) {
+      this.updateAccessStats(indexName, memoryIds).catch((err) => {
+        debugLog(
+          'access',
+          `Failed to update access stats for ${memoryIds.length} related memories:`,
+          err
+        );
+      });
+    }
+
+    return memories;
+  }
+
   async getDatabaseInfo(): Promise<DatabaseInfo> {
     // Get total document count
     const totalResult = await this.pool.query<{ count: string }>(
@@ -1268,6 +1526,153 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       pendingDocumentCount: 0,
       indexes,
     };
+  }
+
+  /**
+   * Find the shortest path of relationships between two memories.
+   */
+  async findRelationshipPath(
+    indexName: string,
+    sourceId: string,
+    targetId: string,
+    options?: {
+      maxDepth?: number;
+      relationshipTypes?: string[];
+    }
+  ): Promise<
+    Array<{
+      sourceId: string;
+      targetId: string;
+      type: string;
+      metadata?: Record<string, unknown>;
+    }>
+  > {
+    const normalizedIndexName = indexName.trim();
+    const normalizedSourceId = sourceId.trim();
+    const normalizedTargetId = targetId.trim();
+
+    if (!normalizedIndexName) {
+      throw new Error('indexName is required');
+    }
+
+    if (!normalizedSourceId) {
+      throw new Error('sourceId is required');
+    }
+
+    if (!normalizedTargetId) {
+      throw new Error('targetId is required');
+    }
+
+    if (normalizedSourceId === normalizedTargetId) {
+      throw new Error('sourceId and targetId must be different');
+    }
+
+    const maxDepth = Math.min(Math.max(options?.maxDepth ?? 5, 1), 10);
+    const relationshipTypes = options?.relationshipTypes
+      ?.map((type) => type.trim())
+      .filter((type) => type.length > 0);
+
+    const indexResult = await this.pool.query<{ id: string }>(
+      'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
+      [this.projectId, normalizedIndexName]
+    );
+
+    if (indexResult.rows.length === 0) {
+      return [];
+    }
+
+    const indexId = indexResult.rows[0].id;
+
+    const params: unknown[] = [];
+    const addParam = (value: unknown) => {
+      params.push(value);
+      return `$${params.length}`;
+    };
+
+    const projectParam = addParam(this.projectId);
+    const indexParam = addParam(indexId);
+    const sourceParam = addParam(normalizedSourceId);
+    const targetParam = addParam(normalizedTargetId);
+    const maxDepthParam = addParam(maxDepth);
+
+    let relationshipFilterClause = '';
+    if (relationshipTypes && relationshipTypes.length > 0) {
+      const relationshipParam = addParam(relationshipTypes);
+      relationshipFilterClause = ` AND relationship_type = ANY(${relationshipParam}::text[])`;
+    }
+
+    const query = `
+      WITH RECURSIVE
+      edges AS (
+        SELECT source_id, target_id, relationship_type, metadata
+        FROM memory_relationships
+        WHERE project = ${projectParam}
+          AND index_id = ${indexParam}
+          ${relationshipFilterClause}
+      ),
+      search AS (
+        SELECT
+          e.target_id AS current_id,
+          1 AS depth,
+          ARRAY[${sourceParam}::text, e.target_id] AS visited,
+          jsonb_build_array(
+            jsonb_build_object(
+              'sourceId', e.source_id,
+              'targetId', e.target_id,
+              'type', e.relationship_type,
+              'metadata', COALESCE(e.metadata, '{}'::jsonb)
+            )
+          ) AS path_edges
+        FROM edges e
+        WHERE e.source_id = ${sourceParam}
+
+        UNION ALL
+
+        SELECT
+          e.target_id AS current_id,
+          s.depth + 1 AS depth,
+          s.visited || e.target_id,
+          s.path_edges || jsonb_build_array(
+            jsonb_build_object(
+              'sourceId', e.source_id,
+              'targetId', e.target_id,
+              'type', e.relationship_type,
+              'metadata', COALESCE(e.metadata, '{}'::jsonb)
+            )
+          )
+        FROM edges e
+        INNER JOIN search s ON e.source_id = s.current_id
+        WHERE s.depth < ${maxDepthParam}
+          AND NOT (e.target_id = ANY(s.visited))
+      )
+      SELECT path_edges, depth
+      FROM search
+      WHERE current_id = ${targetParam}
+      ORDER BY depth
+      LIMIT 1
+    `;
+
+    type PathRow = {
+      path_edges: Array<{
+        sourceId: string;
+        targetId: string;
+        type: string;
+        metadata?: Record<string, unknown>;
+      }>;
+    };
+
+    const result = await this.runQuery<PathRow>('find-relationship-path', query, params);
+
+    if (result.rows.length === 0 || !Array.isArray(result.rows[0].path_edges)) {
+      return [];
+    }
+
+    return result.rows[0].path_edges.map((edge) => ({
+      sourceId: edge.sourceId,
+      targetId: edge.targetId,
+      type: edge.type,
+      metadata: edge.metadata ?? undefined,
+    }));
   }
 
   /**

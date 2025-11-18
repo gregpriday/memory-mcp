@@ -13,8 +13,16 @@
  * - Field access: `@id` for memory ID, `@metadata.fieldName` for metadata properties
  *
  * **Denormalized Fields:**
- * The following metadata fields map directly to database columns for performance:
+ * The following metadata fields map directly to database columns for performance.
+ * Queries on these fields leverage composite indexes for fast filtering:
  * - `topic`, `importance`, `tags`, `source`, `sourcePath`, `kind`, `memoryType`
+ *
+ * **Composite Indexes:**
+ * The following indexes are available for optimized query patterns:
+ * - `idx_memories_type_topic_priority`: Composite index (index_id, memory_type, topic, current_priority DESC)
+ *   Used for recall operations filtering by type, topic, and priority
+ * - `idx_memories_metadata_gin`: GIN index on metadata JSONB field
+ *   Used for custom metadata queries on non-denormalized fields
  *
  * **JSONB Fields:**
  * Custom metadata fields not in the denormalized list are accessed via JSONB operators.
