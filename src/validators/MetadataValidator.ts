@@ -253,9 +253,17 @@ export class MetadataValidator {
     if (!regex.test(date)) {
       return false;
     }
-    // Also verify it's a valid date
-    const d = new Date(date);
-    return d instanceof Date && !isNaN(d.getTime());
+    // Extract parts and validate they represent a real date
+    const [year, month, day] = date.split('-').map(Number);
+    // Create date and verify it doesn't overflow (JS normalizes 2024-02-31 to 2024-03-02)
+    const d = new Date(year, month - 1, day);
+    return (
+      d instanceof Date &&
+      !isNaN(d.getTime()) &&
+      d.getFullYear() === year &&
+      d.getMonth() === month - 1 &&
+      d.getDate() === day
+    );
   }
 
   /**

@@ -946,20 +946,22 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
     const result = await this.pool.query<{
       name: string;
       count: string;
+      description: string | null;
     }>(
-      `SELECT mi.name, COUNT(m.id)::text as count
+      `SELECT mi.name, mi.description, COUNT(m.id)::text as count
        FROM memory_indexes mi
        LEFT JOIN memories m ON m.index_id = mi.id AND m.project = mi.project
        WHERE mi.project = $1
-       GROUP BY mi.id, mi.name
+       GROUP BY mi.id, mi.name, mi.description
        ORDER BY mi.name`,
       [this.projectId]
     );
 
-    return result.rows.map((row: { name: string; count: string }) => ({
+    return result.rows.map((row: { name: string; count: string; description: string | null }) => ({
       name: row.name,
       documentCount: parseInt(row.count, 10),
       pendingDocumentCount: 0, // Postgres doesn't have pending documents
+      description: row.description ?? undefined,
     }));
   }
 }
