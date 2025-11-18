@@ -368,6 +368,18 @@ export interface SearchDiagnostics {
   /** Error message if search failed */
   lastError?: string;
 
+  /** Postgres error code if applicable (e.g., '57P01', 'ECONNREFUSED') */
+  postgresCode?: string;
+
+  /** Human-readable troubleshooting hint */
+  hint?: string;
+
+  /** Array of suggested fixes or actions to resolve the error */
+  suggestedFixes?: string[];
+
+  /** Additional error details (connection info, dimension info, etc.) */
+  details?: Record<string, unknown>;
+
   /** ISO timestamp when search was executed */
   timestamp: string;
 }

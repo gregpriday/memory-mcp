@@ -19,4 +19,32 @@ export class MemorySearchError extends Error {
       Error.captureStackTrace(this, MemorySearchError);
     }
   }
+
+  /**
+   * Get the Postgres error code if available
+   */
+  get postgresCode(): string | undefined {
+    return this.diagnostics.postgresCode;
+  }
+
+  /**
+   * Get troubleshooting hint if available
+   */
+  get hint(): string | undefined {
+    return this.diagnostics.hint;
+  }
+
+  /**
+   * Get suggested fixes if available
+   */
+  get suggestedFixes(): string[] | undefined {
+    return this.diagnostics.suggestedFixes;
+  }
+
+  /**
+   * Get additional error details if available
+   */
+  get details(): Record<string, unknown> | undefined {
+    return this.diagnostics.details;
+  }
 }

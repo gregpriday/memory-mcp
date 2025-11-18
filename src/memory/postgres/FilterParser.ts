@@ -48,6 +48,52 @@
  */
 
 // ============================================================================
+// Filter Parser Error
+// ============================================================================
+
+/**
+ * Structured error for filter parsing failures with detailed context
+ */
+export class FilterParserError extends Error {
+  /** Stage where the error occurred */
+  public readonly stage: 'tokenizer' | 'parser' | 'translator';
+
+  /** Position in the input string where error occurred */
+  public readonly position: number;
+
+  /** Length of the problematic segment (if applicable) */
+  public readonly length?: number;
+
+  /** Snippet of the problematic part of the expression */
+  public readonly snippet?: string;
+
+  /** Human-readable troubleshooting hint */
+  public readonly hint?: string;
+
+  constructor(options: {
+    message: string;
+    stage: 'tokenizer' | 'parser' | 'translator';
+    position: number;
+    length?: number;
+    snippet?: string;
+    hint?: string;
+  }) {
+    super(options.message);
+    this.name = 'FilterParserError';
+    this.stage = options.stage;
+    this.position = options.position;
+    this.length = options.length;
+    this.snippet = options.snippet;
+    this.hint = options.hint;
+
+    // Maintain proper stack trace
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, FilterParserError);
+    }
+  }
+}
+
+// ============================================================================
 // AST Node Types
 // ============================================================================
 
@@ -109,7 +155,7 @@ class Tokenizer {
   private input: string;
 
   constructor(input: string) {
-    this.input = input.trim();
+    this.input = input;
   }
 
   private peek(): string {
@@ -147,7 +193,14 @@ class Tokenizer {
 
     // Validate string was properly closed
     if (this.peek() !== '"') {
-      throw new Error(`Unterminated string at position ${this.pos}`);
+      const snippet = this.input.slice(Math.max(0, this.pos - 20), this.pos + 20);
+      throw new FilterParserError({
+        message: `Unterminated string at position ${this.pos}`,
+        stage: 'tokenizer',
+        position: this.pos,
+        snippet: `...${snippet}...`,
+        hint: 'Close the string with a double quote (")',
+      });
     }
 
     this.advance(); // skip closing "
@@ -166,7 +219,14 @@ class Tokenizer {
 
     // Validate numeric format to catch malformed inputs like "1.2.3"
     if (!/^-?\d+(\.\d+)?$/.test(numStr)) {
-      throw new Error(`Invalid number format: ${numStr}`);
+      throw new FilterParserError({
+        message: `Invalid number format: ${numStr}`,
+        stage: 'tokenizer',
+        position: this.pos - numStr.length,
+        length: numStr.length,
+        snippet: numStr,
+        hint: 'Numbers must be in format: 123 or 123.45 (only one decimal point)',
+      });
     }
 
     return parseFloat(numStr);
@@ -242,7 +302,14 @@ class Tokenizer {
         } else if (ident === 'true' || ident === 'false') {
           tokens.push({ type: 'BOOLEAN', value: ident === 'true', position: startPos });
         } else {
-          throw new Error(`Unexpected identifier '${ident}' at position ${startPos}`);
+          throw new FilterParserError({
+            message: `Unexpected identifier '${ident}' at position ${startPos}`,
+            stage: 'tokenizer',
+            position: startPos,
+            length: ident.length,
+            snippet: ident,
+            hint: 'Valid keywords are: AND, OR, CONTAINS, true, false. Use @metadata.field for metadata fields.',
+          });
         }
         continue;
       }
@@ -259,7 +326,14 @@ class Tokenizer {
         continue;
       }
 
-      throw new Error(`Unexpected character '${ch}' at position ${this.pos}`);
+      throw new FilterParserError({
+        message: `Unexpected character '${ch}' at position ${this.pos}`,
+        stage: 'tokenizer',
+        position: this.pos,
+        length: 1,
+        snippet: ch,
+        hint: 'Valid syntax includes: @field, "string", numbers, =, ==, CONTAINS, AND, OR, (, )',
+      });
     }
 
     tokens.push({ type: 'EOF', value: '', position: this.pos });
@@ -297,7 +371,13 @@ class Parser {
   private expect(type: TokenType, message: string): Token {
     const token = this.peek();
     if (token.type !== type) {
-      throw new Error(`${message} at position ${token.position}. Got ${token.type}`);
+      throw new FilterParserError({
+        message: `${message} at position ${token.position}. Got ${token.type}`,
+        stage: 'parser',
+        position: token.position,
+        snippet: String(token.value),
+        hint: `Expected ${type} but found ${token.type}`,
+      });
     }
     return this.advance();
   }
@@ -387,7 +467,7 @@ class Parser {
   private parseComparison(): ComparisonNode {
     // Parse field
     const fieldToken = this.expect('FIELD', 'Expected field');
-    const field = this.parseField(fieldToken.value as string);
+    const field = this.parseField(fieldToken);
 
     // Parse operator
     const opToken = this.expect('OPERATOR', 'Expected operator (=, ==, CONTAINS)');
@@ -407,7 +487,9 @@ class Parser {
   /**
    * Parse field: @id, @metadata, @metadata.fieldName
    */
-  private parseField(fieldStr: string): FieldNode {
+  private parseField(fieldToken: Token): FieldNode {
+    const fieldStr = fieldToken.value as string;
+
     if (fieldStr === '@id') {
       return { type: 'field', source: 'id' };
     }
@@ -419,12 +501,24 @@ class Parser {
     if (fieldStr.startsWith('@metadata.')) {
       const name = fieldStr.substring('@metadata.'.length);
       if (!name) {
-        throw new Error(`Invalid field: ${fieldStr}`);
+        throw new FilterParserError({
+          message: `Invalid field: ${fieldStr}`,
+          stage: 'parser',
+          position: fieldToken.position,
+          snippet: fieldStr,
+          hint: 'Field name cannot be empty after @metadata. Use @metadata.fieldName',
+        });
       }
       return { type: 'field', source: 'metadata', name };
     }
 
-    throw new Error(`Invalid field: ${fieldStr}. Expected @id or @metadata[.field]`);
+    throw new FilterParserError({
+      message: `Invalid field: ${fieldStr}. Expected @id or @metadata[.field]`,
+      stage: 'parser',
+      position: fieldToken.position,
+      snippet: fieldStr,
+      hint: 'Valid field formats: @id or @metadata.fieldName (e.g., @metadata.tags)',
+    });
   }
 
   /**
@@ -441,7 +535,13 @@ class Parser {
       };
     }
 
-    throw new Error(`Expected literal value at position ${token.position}`);
+    throw new FilterParserError({
+      message: `Expected literal value at position ${token.position}`,
+      stage: 'parser',
+      position: token.position,
+      snippet: String(token.value),
+      hint: 'Literal values must be strings ("text"), numbers (123), or booleans (true/false)',
+    });
   }
 }
 
@@ -511,7 +611,13 @@ class SQLTranslator {
     // Handle @id field
     if (field.source === 'id') {
       if (normalizedOp === 'CONTAINS') {
-        throw new Error('CONTAINS operator not supported for @id field');
+        throw new FilterParserError({
+          message: 'CONTAINS operator not supported for @id field',
+          stage: 'translator',
+          position: 0,
+          snippet: '@id CONTAINS',
+          hint: 'Use @id = "value" for exact ID matching',
+        });
       }
       const paramPlaceholder = this.addParam(value.value);
       return `id ${normalizedOp} ${paramPlaceholder}`;
@@ -520,7 +626,13 @@ class SQLTranslator {
     // Handle @metadata fields
     if (field.source === 'metadata') {
       if (!field.name) {
-        throw new Error('Root @metadata access not supported in comparisons');
+        throw new FilterParserError({
+          message: 'Root @metadata access not supported in comparisons',
+          stage: 'translator',
+          position: 0,
+          snippet: '@metadata',
+          hint: 'Use @metadata.fieldName to compare specific metadata fields',
+        });
       }
 
       // Check if this is a denormalized column
@@ -533,7 +645,13 @@ class SQLTranslator {
       }
     }
 
-    throw new Error(`Unsupported field source: ${field.source}`);
+    throw new FilterParserError({
+      message: `Unsupported field source: ${field.source}`,
+      stage: 'translator',
+      position: 0,
+      snippet: `@${field.source}`,
+      hint: 'Only @id and @metadata fields are supported',
+    });
   }
 
   private translateDenormalizedField(
@@ -548,9 +666,13 @@ class SQLTranslator {
     if (fieldName === 'importance' && typeof value.value === 'string') {
       // Importance is an integer field, only equality is supported
       if (operator === 'CONTAINS') {
-        throw new Error(
-          `CONTAINS operator only supported for array fields. Field ${fieldName} is ${type}`
-        );
+        throw new FilterParserError({
+          message: `CONTAINS operator only supported for array fields. Field ${fieldName} is ${type}`,
+          stage: 'translator',
+          position: 0,
+          snippet: `@metadata.${fieldName} CONTAINS`,
+          hint: `Use @metadata.${fieldName} = "value" for exact matching (valid values: low, medium, high)`,
+        });
       }
       const importanceMap: Record<string, number> = {
         low: 0,
@@ -559,9 +681,13 @@ class SQLTranslator {
       };
       const numericValue = importanceMap[value.value.toLowerCase()];
       if (numericValue === undefined) {
-        throw new Error(
-          `Invalid importance value: ${value.value}. Expected 'low', 'medium', or 'high'`
-        );
+        throw new FilterParserError({
+          message: `Invalid importance value: ${value.value}. Expected 'low', 'medium', or 'high'`,
+          stage: 'translator',
+          position: 0,
+          snippet: `"${value.value}"`,
+          hint: 'Valid importance values are: "low", "medium", or "high"',
+        });
       }
       const paramPlaceholder = this.addParam(numericValue);
       return `${column} ${operator} ${paramPlaceholder}`;
@@ -570,7 +696,13 @@ class SQLTranslator {
     // Array containment
     if (type === 'array' && operator === 'CONTAINS') {
       if (typeof value.value !== 'string') {
-        throw new Error(`Array CONTAINS requires string value, got ${typeof value.value}`);
+        throw new FilterParserError({
+          message: `Array CONTAINS requires string value, got ${typeof value.value}`,
+          stage: 'translator',
+          position: 0,
+          snippet: `@metadata.${fieldName} CONTAINS ${value.value}`,
+          hint: 'Array CONTAINS requires a string value, e.g., @metadata.tags CONTAINS "work"',
+        });
       }
       const paramPlaceholder = this.addParam(value.value);
       return `${paramPlaceholder} = ANY(${column})`;
@@ -578,16 +710,24 @@ class SQLTranslator {
 
     // Array equality (not typical, but supported)
     if (type === 'array' && operator === '=') {
-      throw new Error(
-        `Equality comparison not supported for array field ${fieldName}. Use CONTAINS instead.`
-      );
+      throw new FilterParserError({
+        message: `Equality comparison not supported for array field ${fieldName}. Use CONTAINS instead.`,
+        stage: 'translator',
+        position: 0,
+        snippet: `@metadata.${fieldName} =`,
+        hint: `Use @metadata.${fieldName} CONTAINS "value" to check if array contains a value`,
+      });
     }
 
     // Regular equality
     if (operator === 'CONTAINS') {
-      throw new Error(
-        `CONTAINS operator only supported for array fields. Field ${fieldName} is ${type}`
-      );
+      throw new FilterParserError({
+        message: `CONTAINS operator only supported for array fields. Field ${fieldName} is ${type}`,
+        stage: 'translator',
+        position: 0,
+        snippet: `@metadata.${fieldName} CONTAINS`,
+        hint: `Use @metadata.${fieldName} = "value" for exact matching on non-array fields`,
+      });
     }
 
     const paramPlaceholder = this.addParam(value.value);
@@ -605,7 +745,13 @@ class SQLTranslator {
       // metadata->'field' @> '"value"'::jsonb (for string values)
       // Note: This assumes the JSONB field contains an array
       if (typeof value.value !== 'string') {
-        throw new Error(`JSONB array CONTAINS requires string value, got ${typeof value.value}`);
+        throw new FilterParserError({
+          message: `JSONB array CONTAINS requires string value, got ${typeof value.value}`,
+          stage: 'translator',
+          position: 0,
+          snippet: `@metadata.${fieldName} CONTAINS ${value.value}`,
+          hint: 'JSONB array CONTAINS requires a string value, e.g., @metadata.customField CONTAINS "value"',
+        });
       }
 
       // Create a JSON array with the single value to check containment
@@ -632,9 +778,13 @@ class SQLTranslator {
     // Must start with letter/digit/underscore, can contain hyphens in the middle,
     // but cannot start or end with hyphen
     if (!/^[a-zA-Z0-9_][a-zA-Z0-9_-]*[a-zA-Z0-9_]$/.test(key) && !/^[a-zA-Z0-9_]$/.test(key)) {
-      throw new Error(
-        `Invalid JSONB field name: ${key}. Only alphanumeric, underscore, and hyphen allowed.`
-      );
+      throw new FilterParserError({
+        message: `Invalid JSONB field name: ${key}. Only alphanumeric, underscore, and hyphen allowed.`,
+        stage: 'translator',
+        position: 0,
+        snippet: `@metadata.${key}`,
+        hint: 'Field names must be alphanumeric with underscores or hyphens (e.g., my_field, my-field)',
+      });
     }
     return key;
   }
@@ -701,6 +851,12 @@ export function parseFilterExpression(filterExpression: string): SQLTranslation 
     const translator = new SQLTranslator();
     return translator.translate(ast);
   } catch (error) {
+    // Re-throw FilterParserError as-is to preserve detailed error context
+    if (error instanceof FilterParserError) {
+      throw error;
+    }
+
+    // Wrap unknown errors for safety
     throw new Error(
       `Failed to parse filter expression: ${error instanceof Error ? error.message : String(error)}`
     );

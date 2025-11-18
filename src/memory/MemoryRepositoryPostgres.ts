@@ -19,7 +19,7 @@ import { computeTypeDependentPriority } from './PriorityCalculator.js';
 import { MetadataValidator, ValidationError } from '../validators/MetadataValidator.js';
 import { MemorySearchError } from './MemorySearchError.js';
 import { debugLog } from '../utils/logger.js';
-import { parseFilterExpression } from './postgres/FilterParser.js';
+import { parseFilterExpression, FilterParserError } from './postgres/FilterParser.js';
 
 /**
  * MemoryRepositoryPostgres
@@ -36,6 +36,7 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
   private pool: Pool;
   private projectId: string;
   private embeddingService?: EmbeddingService;
+  private databaseUrl: string;
 
   /**
    * @param databaseUrl - PostgreSQL connection string for this project
@@ -46,6 +47,7 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
     this.pool = PoolManager.getPool(databaseUrl);
     this.projectId = projectId;
     this.embeddingService = embeddingService;
+    this.databaseUrl = databaseUrl;
   }
 
   /**
@@ -552,6 +554,132 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
   }
 
   /**
+   * Classify Postgres errors and return enhanced error information
+   */
+  private mapPostgresError(error: unknown): {
+    message: string;
+    postgresCode?: string;
+    hint?: string;
+    suggestedFixes?: string[];
+    details?: Record<string, unknown>;
+  } {
+    // Handle FilterParserError specially
+    if (error instanceof FilterParserError) {
+      return {
+        message: `Filter syntax error: ${error.message}`,
+        postgresCode: 'FILTER_PARSE_ERROR',
+        hint: error.hint,
+        suggestedFixes: error.hint ? [error.hint] : undefined,
+        details: {
+          stage: error.stage,
+          position: error.position,
+          snippet: error.snippet,
+        },
+      };
+    }
+
+    // Handle Node.js system errors (connection issues)
+    if (error && typeof error === 'object' && 'code' in error) {
+      const sysError = error as { code?: string; message?: string };
+
+      // Connection errors
+      if (
+        sysError.code === 'ECONNREFUSED' ||
+        sysError.code === 'ENOTFOUND' ||
+        sysError.code === 'ETIMEDOUT' ||
+        sysError.code === 'ECONNRESET'
+      ) {
+        const url = new URL(this.databaseUrl);
+        return {
+          message: `Unable to connect to PostgreSQL database`,
+          postgresCode: sysError.code,
+          hint: 'Database connection failed',
+          suggestedFixes: [
+            'Check if PostgreSQL server is running and accessible',
+            'Verify MEMORY_POSTGRES_URL environment variable is correct',
+            'Ensure database server is accessible from this host',
+            'Check firewall rules and network connectivity',
+          ],
+          details: {
+            errorCode: sysError.code,
+            // Infrastructure details available for debugging but not in user-facing messages
+            host: url.hostname,
+            port: url.port || 5432,
+            database: url.pathname.slice(1),
+          },
+        };
+      }
+    }
+
+    // Handle Postgres-specific errors
+    if (error && typeof error === 'object' && 'severity' in error) {
+      const pgError = error as {
+        severity?: string;
+        code?: string;
+        message?: string;
+        detail?: string;
+      };
+
+      // Fatal connection errors
+      if (pgError.severity === 'FATAL' || pgError.code?.startsWith('57')) {
+        return {
+          message: `PostgreSQL connection error: ${pgError.message || 'Unknown error'}`,
+          postgresCode: pgError.code,
+          hint: 'Database connection terminated',
+          suggestedFixes: [
+            'Check database server status',
+            'Verify connection credentials',
+            'Review PostgreSQL server logs for details',
+          ],
+          details: {
+            severity: pgError.severity,
+            detail: pgError.detail,
+          },
+        };
+      }
+    }
+
+    // Check for dimension mismatch errors
+    if (error instanceof Error) {
+      const dimMatch = error.message.match(/dimension.*?(\d+).*?(\d+)/i);
+      if (dimMatch || error.message.toLowerCase().includes('dimension')) {
+        const expected = dimMatch?.[1];
+        const actual = dimMatch?.[2];
+        return {
+          message:
+            expected && actual
+              ? `Vector dimension mismatch: expected ${expected}, got ${actual}`
+              : `Vector dimension mismatch: ${error.message}`,
+          postgresCode: 'VECTOR_DIMENSION_MISMATCH',
+          hint: 'Embedding dimensions do not match database schema',
+          suggestedFixes: [
+            expected && actual
+              ? `Update MEMORY_EMBEDDING_DIMENSIONS to ${expected} or recreate schema for ${actual} dimensions`
+              : 'Check MEMORY_EMBEDDING_DIMENSIONS matches your embedding model',
+            'Verify embedding model configuration',
+            'Run migrations to update vector dimensions if needed',
+          ],
+          details: {
+            expectedDimension: expected,
+            actualDimension: actual,
+          },
+        };
+      }
+    }
+
+    // Generic error fallback
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      message,
+      hint: 'An unexpected database error occurred',
+      suggestedFixes: [
+        'Check database logs for more details',
+        'Verify database schema is up to date',
+      ],
+    };
+  }
+
+  /**
    * Search for memories with diagnostic instrumentation.
    */
   async searchMemories(
@@ -641,6 +769,12 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
           searchQuery += ` AND (${adjustedFilterSQL})`;
           params.push(...filterParams);
         } catch (error) {
+          // Re-throw FilterParserError as-is to preserve detailed error context
+          // It will be caught by the outer catch block and processed by mapPostgresError
+          if (error instanceof FilterParserError) {
+            throw error;
+          }
+          // Wrap other errors for safety
           throw new Error(
             `Invalid filter expression: ${error instanceof Error ? error.message : String(error)}`
           );
@@ -725,6 +859,9 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
       return results;
     } catch (error) {
+      // Classify the error and get enhanced diagnostics
+      const errorInfo = this.mapPostgresError(error);
+
       const diagnostics: SearchDiagnostics = {
         index: indexName,
         query,
@@ -737,14 +874,19 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
         resultCount: 0,
         retryCount: 0,
         timestamp: new Date().toISOString(),
-        lastError: error instanceof Error ? error.message : String(error),
+        lastError: errorInfo.message,
+        postgresCode: errorInfo.postgresCode,
+        hint: errorInfo.hint,
+        suggestedFixes: errorInfo.suggestedFixes,
+        details: errorInfo.details,
       };
 
       options?.diagnosticsListener?.(diagnostics);
 
       throw new MemorySearchError(
-        `Search failed for index "${indexName}": ${error instanceof Error ? error.message : String(error)}`,
-        diagnostics
+        `Search failed for index "${indexName}": ${errorInfo.message}`,
+        diagnostics,
+        error instanceof Error ? error : undefined
       );
     }
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { parseFilterExpression } from '../FilterParser.js';
+import { parseFilterExpression, FilterParserError } from '../FilterParser.js';
 
 describe('parseFilterExpression', () => {
   describe('basic comparisons', () => {
@@ -330,14 +330,15 @@ describe('parseFilterExpression', () => {
   });
 
   describe('parser error wrapping', () => {
-    it('should wrap errors with "Failed to parse filter expression"', () => {
-      expect(() => parseFilterExpression('invalid')).toThrow(/Failed to parse filter expression:/);
+    it('should throw FilterParserError directly (not wrapped)', () => {
+      expect(() => parseFilterExpression('invalid')).toThrow(FilterParserError);
     });
 
-    it('should include inner error message in wrapped error', () => {
+    it('should throw FilterParserError with original message', () => {
       expect(() => parseFilterExpression('@id CONTAINS "x"')).toThrow(
-        /Failed to parse filter expression:.*CONTAINS operator not supported/
+        /CONTAINS operator not supported/
       );
+      expect(() => parseFilterExpression('@id CONTAINS "x"')).toThrow(FilterParserError);
     });
   });
 
@@ -456,6 +457,207 @@ describe('parseFilterExpression', () => {
       expect(() => parseFilterExpression('@metadata.source CONTAINS "user"')).toThrow(
         /CONTAINS operator only supported for array fields/
       );
+    });
+  });
+
+  describe('FilterParserError structure', () => {
+    describe('tokenizer errors', () => {
+      it('should throw FilterParserError for unterminated string with position and hint', () => {
+        expect(() => parseFilterExpression('@id = "unterminated')).toThrow(FilterParserError);
+
+        try {
+          parseFilterExpression('@id = "unterminated');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('tokenizer');
+          expect(fpError.position).toBeGreaterThan(0);
+          expect(fpError.snippet).toBeDefined();
+          expect(fpError.hint).toContain('double quote');
+        }
+      });
+
+      it('should throw FilterParserError for invalid number format', () => {
+        expect(() => parseFilterExpression('@metadata.value = 1.2.3')).toThrow(FilterParserError);
+
+        try {
+          parseFilterExpression('@metadata.value = 1.2.3');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('tokenizer');
+          expect(fpError.snippet).toContain('1.2.3');
+          expect(fpError.hint).toContain('decimal point');
+        }
+      });
+
+      it('should throw FilterParserError for unexpected identifier', () => {
+        expect(() => parseFilterExpression('@id = "test" INVALID @id = "test2"')).toThrow(
+          FilterParserError
+        );
+
+        try {
+          parseFilterExpression('@id = "test" INVALID @id = "test2"');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('tokenizer');
+          expect(fpError.snippet).toContain('INVALID');
+          expect(fpError.hint).toContain('keyword');
+        }
+      });
+
+      it('should throw FilterParserError for unexpected character', () => {
+        expect(() => parseFilterExpression('@id $ "test"')).toThrow(FilterParserError);
+
+        try {
+          parseFilterExpression('@id $ "test"');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('tokenizer');
+          expect(fpError.snippet).toBe('$');
+          expect(fpError.hint).toBeDefined();
+        }
+      });
+    });
+
+    describe('parser errors', () => {
+      it('should throw FilterParserError for invalid field format', () => {
+        expect(() => parseFilterExpression('@invalid = "test"')).toThrow(FilterParserError);
+
+        try {
+          parseFilterExpression('@invalid = "test"');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('parser');
+          expect(fpError.snippet).toContain('@invalid');
+          expect(fpError.hint).toContain('id');
+          expect(fpError.hint).toContain('metadata');
+        }
+      });
+
+      it('should throw FilterParserError for empty field after @metadata.', () => {
+        expect(() => parseFilterExpression('@metadata. = "test"')).toThrow(FilterParserError);
+
+        try {
+          parseFilterExpression('@metadata. = "test"');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('parser');
+          expect(fpError.hint).toContain('fieldName');
+        }
+      });
+    });
+
+    describe('translator errors', () => {
+      it('should throw FilterParserError for CONTAINS on @id field', () => {
+        expect(() => parseFilterExpression('@id CONTAINS "test"')).toThrow(FilterParserError);
+
+        try {
+          parseFilterExpression('@id CONTAINS "test"');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('translator');
+          expect(fpError.snippet).toContain('@id CONTAINS');
+          expect(fpError.hint).toContain('exact ID matching');
+        }
+      });
+
+      it('should throw FilterParserError for root @metadata access', () => {
+        expect(() => parseFilterExpression('@metadata = "test"')).toThrow(FilterParserError);
+
+        try {
+          parseFilterExpression('@metadata = "test"');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('translator');
+          expect(fpError.snippet).toBe('@metadata');
+          expect(fpError.hint).toContain('fieldName');
+        }
+      });
+
+      it('should throw FilterParserError for invalid importance value', () => {
+        expect(() => parseFilterExpression('@metadata.importance = "invalid"')).toThrow(
+          FilterParserError
+        );
+
+        try {
+          parseFilterExpression('@metadata.importance = "invalid"');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('translator');
+          expect(fpError.snippet).toContain('invalid');
+          expect(fpError.hint).toContain('low');
+          expect(fpError.hint).toContain('medium');
+          expect(fpError.hint).toContain('high');
+        }
+      });
+
+      it('should throw FilterParserError for array CONTAINS with non-string value', () => {
+        expect(() => parseFilterExpression('@metadata.tags CONTAINS 123')).toThrow(
+          FilterParserError
+        );
+
+        try {
+          parseFilterExpression('@metadata.tags CONTAINS 123');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('translator');
+          expect(fpError.hint).toContain('string value');
+        }
+      });
+
+      it('should throw FilterParserError for equality on array field', () => {
+        expect(() => parseFilterExpression('@metadata.tags = "test"')).toThrow(FilterParserError);
+
+        try {
+          parseFilterExpression('@metadata.tags = "test"');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('translator');
+          expect(fpError.hint).toContain('CONTAINS');
+        }
+      });
+
+      it('should throw FilterParserError for CONTAINS on non-array field', () => {
+        expect(() => parseFilterExpression('@metadata.topic CONTAINS "test"')).toThrow(
+          FilterParserError
+        );
+
+        try {
+          parseFilterExpression('@metadata.topic CONTAINS "test"');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('translator');
+          expect(fpError.hint).toContain('exact matching');
+        }
+      });
+
+      it('should throw FilterParserError for invalid JSONB field name', () => {
+        // Use a field name with invalid characters that passes tokenizer/parser but fails in translator
+        expect(() => parseFilterExpression('@metadata.-invalidfield = "test"')).toThrow(
+          FilterParserError
+        );
+
+        try {
+          parseFilterExpression('@metadata.-invalidfield = "test"');
+        } catch (error) {
+          expect(error).toBeInstanceOf(FilterParserError);
+          const fpError = error as FilterParserError;
+          expect(fpError.stage).toBe('translator');
+          expect(fpError.snippet).toContain('@metadata.-invalidfield');
+          expect(fpError.hint).toContain('alphanumeric');
+        }
+      });
     });
   });
 });
