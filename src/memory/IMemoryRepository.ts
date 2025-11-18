@@ -529,4 +529,68 @@ export interface IMemoryRepository {
       metadata?: Record<string, unknown>;
     }>
   >;
+
+  /**
+   * Increment the sleepCycles counter on specified memories.
+   *
+   * Updates the `sleepCycles` field in memory metadata to track refinement passes.
+   * Used during reconsolidation to mark memories that were processed and evolved.
+   *
+   * @param indexName - Index containing the memories
+   * @param ids - Memory IDs to update
+   * @param amount - Number of cycles to increment by (default: 1)
+   * @returns Number of memories successfully updated
+   *
+   * @remarks
+   * - Non-existent IDs are silently ignored
+   * - Only the `sleepCycles` field is modified; other fields remain unchanged
+   * - Returns actual count of memories updated (may be less than requested if some IDs don't exist)
+   *
+   * @example
+   * ```typescript
+   * // Increment sleep cycles for memories involved in reconsolidation
+   * const updated = await repo.incrementSleepCycles('chat-history', [
+   *   'memory-1',
+   *   'memory-2',
+   *   'memory-3'
+   * ]);
+   * console.log(`Updated ${updated} memories`);
+   * ```
+   */
+  incrementSleepCycles(indexName: string, ids: string[], amount?: number): Promise<number>;
+
+  /**
+   * Mark memories as superseded by other memories.
+   *
+   * Sets the `supersededById` field on source memories to indicate they are
+   * superseded by a replacement memory. Used during reconsolidation when a
+   * synthesized memory replaces or consolidates older memories.
+   *
+   * @param indexName - Index containing the memories
+   * @param pairs - Array of (sourceId, supersededById) pairs where supersededById can be:
+   *   - A string memory ID (must exist in the same index)
+   *   - A number referencing an index in a derivedMemories array (only used internally by executor)
+   * @returns Number of memories successfully updated
+   *
+   * @remarks
+   * - Non-existent source IDs are silently ignored
+   * - Only the `supersededById` field is modified; other fields remain unchanged
+   * - Multiple source memories can be superseded by the same derived memory
+   * - Returns actual count of memories updated (may be less than requested if some IDs don't exist)
+   *
+   * @example
+   * ```typescript
+   * // Mark old memories as superseded by a new derived summary
+   * const updated = await repo.markMemoriesSuperseded('chat-history', [
+   *   { sourceId: 'episode-1', supersededById: 'summary-1' },
+   *   { sourceId: 'episode-2', supersededById: 'summary-1' },
+   *   { sourceId: 'episode-3', supersededById: 'summary-1' }
+   * ]);
+   * console.log(`Marked ${updated} memories as superseded`);
+   * ```
+   */
+  markMemoriesSuperseded(
+    indexName: string,
+    pairs: Array<{ sourceId: string; supersededById: string | number }>
+  ): Promise<number>;
 }

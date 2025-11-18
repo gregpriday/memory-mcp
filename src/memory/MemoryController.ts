@@ -269,6 +269,22 @@ export class MemoryController {
         }
       }
 
+      // Add consolidation summary if reconsolidation occurred
+      if (result.consolidationReport) {
+        const { createdMemoryIds, supersededPairs, sleepCycleIncrementedIds } =
+          result.consolidationReport;
+        summary += `\n\n**Memory Reconsolidation:**`;
+        if (createdMemoryIds.length > 0) {
+          summary += `\n- Created ${createdMemoryIds.length} derived memories from synthesis`;
+        }
+        if (supersededPairs.length > 0) {
+          summary += `\n- Marked ${supersededPairs.length} memories as superseded`;
+        }
+        if (sleepCycleIncrementedIds.length > 0) {
+          summary += `\n- Processed ${sleepCycleIncrementedIds.length} memories through consolidation`;
+        }
+      }
+
       return this.formatResponse(result, summary);
     } catch (error) {
       console.error('Recall tool error:', error);

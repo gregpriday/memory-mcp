@@ -179,7 +179,7 @@ export function createMemoryServer(config?: {
         {
           name: 'recall',
           description:
-            'Search stored memories and optionally synthesize an answer. Supports metadata filters, returning raw memories, and priority-aware synthesis.',
+            'Search stored memories and optionally synthesize an answer. Supports metadata filters, returning raw memories, priority-aware synthesis, and automatic memory reconsolidation.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -212,6 +212,11 @@ export function createMemoryServer(config?: {
                 enum: ['answer', 'memories', 'both'],
                 description:
                   'Controls whether the agent returns synthesized answers, raw memories, or both.',
+              },
+              enableReconsolidation: {
+                type: 'boolean',
+                description:
+                  'Optional (defaults to false). When true, enables automatic lightweight memory reconsolidation after synthesis. The agent may create derived memories from consolidated insights, mark supersessions, and increment sleep cycles. Best-effort operation that does not affect recall results if it fails.',
               },
             },
             required: ['query'],

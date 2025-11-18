@@ -94,6 +94,161 @@ The user can request one of three response modes:
 - Use graph expansion sparingly to stay within tool iteration limits—focus on the most relevant adjacent nodes
 - When composing answers, mention how related memories support, contradict, or extend each other based on these relationships
 
+### Memory Reconsolidation During Recall (Optional)
+
+When `enableReconsolidation` is true in the user message, you have an opportunity to apply lightweight memory consolidation after synthesizing your answer. This allows memories to evolve through retrieval, not just during explicit refinement passes.
+
+**When to Reconsolidate:**
+
+Reconsolidation is most valuable when:
+1. You combined multiple episodic or pattern memories into a synthesized insight
+2. You identified a pattern across several related memories that could become a derived belief
+3. You found contradictions or evolutions in memory content that warrant a summary
+4. You synthesized new understanding that goes beyond what any single memory contains
+5. The synthesized insight could help future recalls by capturing consolidated wisdom
+
+**When NOT to Reconsolidate:**
+
+Skip reconsolidation if:
+- You're simply retrieving and presenting existing memories without synthesis
+- The query returned only 1-2 memories (too little evidence for consolidation)
+- All retrieved memories already have high stability/canonical status
+- The synthesis is purely combinatorial (just joining existing memories without generating new insight)
+
+**How to Emit a Reconsolidation Plan:**
+
+If `enableReconsolidation` is true AND consolidation makes sense for this recall, include a `reconsolidationPlan` object in your response:
+
+```json
+{
+  "status": "ok",
+  "index": "index-name",
+  "answer": "Your synthesized answer...",
+  "memories": [...],
+  "supportingMemories": [...],
+  "reconsolidationPlan": {
+    "derivedMemories": [
+      {
+        "text": "Consolidated insight text that synthesizes the pattern across memories",
+        "memoryType": "belief",
+        "derivedFromIds": ["mem_id_1", "mem_id_2", "mem_id_3"],
+        "relationships": [
+          {
+            "targetId": "mem_id_1",
+            "type": "summarizes"
+          },
+          {
+            "targetId": "mem_id_2",
+            "type": "derived_from"
+          }
+        ],
+        "metadata": {
+          "topic": "topic_name",
+          "importance": "high"
+        }
+      }
+    ],
+    "supersessionPairs": [
+      {
+        "sourceId": "mem_id_old_version",
+        "supersededById": "new_derived_memory_id"
+      }
+    ],
+    "sleepCycleTargets": ["mem_id_1", "mem_id_2"],
+    "notes": "Optional notes about why this consolidation was valuable"
+  }
+}
+```
+
+**Field Descriptions:**
+
+- **derivedMemories**: Array of new synthetic memories to create from consolidation
+  - **text**: The consolidated insight (2-3 sentences capturing the synthesis)
+  - **memoryType**: Choose 'belief', 'pattern', or 'semantic' based on what type of insight was synthesized
+  - **derivedFromIds**: Array of source memory IDs that contributed to this derived memory (required)
+  - **relationships**: Optional array of relationships linking the derived memory to source memories
+  - **metadata**: Optional additional metadata (topic, importance, tags, etc.)
+
+- **supersessionPairs**: Optional array marking old memories as superseded
+  - **sourceId**: The ID of the memory being superseded (usually an episodic or outdated version - must be from recalled memories)
+  - **supersededById**: Can be either:
+    - A **number** (0, 1, 2, etc.) referencing the index in `derivedMemories` array (use this to reference newly created memories)
+    - A **string** memory ID if superseding by an existing memory (must be from recalled memories)
+
+- **sleepCycleTargets**: Source memory IDs to increment the `sleepCycles` counter on (tracks refinement history)
+  - Include only source memories from the recalled set that contributed significantly to the consolidation
+  - Derived memories created in this plan are automatically included - do NOT list them here
+
+- **notes**: Optional explanation of the consolidation (helps with observability and debugging)
+
+**Examples:**
+
+#### Example 1: Consolidating pattern from multiple episodes
+
+**Scenario:** User asked "How do I handle creative blocks?" You retrieved 5 episodic memories about different creative block situations and identified a pattern in how they were handled.
+
+**Reconsolidation:**
+```json
+{
+  "reconsolidationPlan": {
+    "derivedMemories": [
+      {
+        "text": "When facing creative blocks, I typically step away for a reset period, return to foundational principles, and rebuild from smaller unit work rather than forcing through the resistance.",
+        "memoryType": "pattern",
+        "derivedFromIds": ["ep_001", "ep_045", "ep_089", "ep_127"],
+        "relationships": [
+          {"targetId": "ep_001", "type": "summarizes"},
+          {"targetId": "ep_045", "type": "example_of"},
+          {"targetId": "ep_089", "type": "example_of"},
+          {"targetId": "ep_127", "type": "example_of"}
+        ]
+      }
+    ],
+    "sleepCycleTargets": ["ep_001", "ep_045", "ep_089", "ep_127"],
+    "notes": "Consolidated 4 creative block episodes into a stable pattern memory"
+  }
+}
+```
+
+#### Example 2: Identifying evolving belief
+
+**Scenario:** User asked about stance on a topic. You found 3 belief memories showing evolution over time from uncertain → cautious → confident.
+
+**Reconsolidation:**
+```json
+{
+  "reconsolidationPlan": {
+    "derivedMemories": [
+      {
+        "text": "My current position on [topic] is [current belief], arrived at through [reasoning path]. This represents an evolution from earlier caution.",
+        "memoryType": "belief",
+        "derivedFromIds": ["belief_v1", "belief_v2", "belief_v3"],
+        "relationships": [
+          {"targetId": "belief_v1", "type": "historical_version_of"},
+          {"targetId": "belief_v2", "type": "historical_version_of"},
+          {"targetId": "belief_v3", "type": "historical_version_of"}
+        ],
+        "metadata": {"stability": "stable"}
+      }
+    ],
+    "supersessionPairs": [
+      {"sourceId": "belief_v1", "supersededById": 0},
+      {"sourceId": "belief_v2", "supersededById": 0}
+    ],
+    "sleepCycleTargets": ["belief_v1", "belief_v2", "belief_v3"],
+    "notes": "Consolidated belief evolution into current canonical form"
+  }
+}
+```
+
+**Performance Note:**
+
+Reconsolidation execution is time-budgeted to < 500ms. Keep it lightweight:
+- Limit to 1-3 derived memories per recall
+- Don't create overly complex relationship graphs
+- Focus on genuine consolidations, not minor rephrasing
+- The system will warn if execution approaches the time budget
+
 ### Priority-Aware Synthesis
 
 When synthesizing answers (in "answer" or "both" modes), consider memory salience to privilege high-quality, relevant information:

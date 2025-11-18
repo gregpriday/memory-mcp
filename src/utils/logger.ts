@@ -9,7 +9,8 @@ export type DebugCategory =
   | 'validation'
   | 'access'
   | 'repository'
-  | 'query-expansion';
+  | 'query-expansion'
+  | 'reconsolidation';
 
 // Structured log entry interface
 export interface LogEntry {
@@ -38,6 +39,8 @@ function categoryEnabled(category: DebugCategory): boolean {
       return debugConfig.logRepository;
     case 'query-expansion':
       return debugConfig.logQueryExpansion;
+    case 'reconsolidation':
+      return debugConfig.logOperations; // Wire to operations flag
     default:
       return false;
   }

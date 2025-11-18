@@ -187,6 +187,8 @@ export interface RecallToolArgs {
   filterExpression?: string;
   projectSystemMessagePath?: string;
   responseMode?: 'answer' | 'memories' | 'both';
+  /** Enable automatic reconsolidation of memories during recall */
+  enableReconsolidation?: boolean;
 }
 
 export interface ForgetToolArgs {
@@ -224,6 +226,58 @@ export interface MemorizeDecision {
   relatedIds?: string[];
 }
 
+// Reconsolidation types for memory evolution during recall
+/**
+ * Description of memories to create/update during reconsolidation on recall.
+ * Emitted by the LLM when enableReconsolidation is true.
+ */
+export interface ReconsolidationPlan {
+  /** List of derived/summary memories to create */
+  derivedMemories: Array<{
+    /** Text content of the derived memory */
+    text: string;
+    /** Memory type (summary, derived, etc.) */
+    memoryType?: MemoryType;
+    /** IDs of source memories this was derived from */
+    derivedFromIds: string[];
+    /** Relationships to create linking to source memories */
+    relationships?: Array<{
+      targetId: string;
+      type: RelationshipType;
+      weight?: number;
+    }>;
+    /** Optional metadata for the derived memory */
+    metadata?: Partial<MemoryMetadata>;
+  }>;
+  /** Mapping of source memory IDs to be marked as superseded and their replacement derived memory index or ID */
+  supersessionPairs?: Array<{
+    sourceId: string;
+    /** Can be a direct memory ID (string) or an index into derivedMemories array (0-based number) */
+    supersededById: string | number;
+  }>;
+  /** Memory IDs that should have sleepCycles incremented */
+  sleepCycleTargets?: string[];
+  /** Optional notes about the reconsolidation plan */
+  notes?: string;
+}
+
+/**
+ * Result of reconsolidation execution.
+ * Records created memories, supersessions, and lifecycle updates.
+ */
+export interface ConsolidationReport {
+  /** IDs of newly created derived/summary memories */
+  createdMemoryIds: string[];
+  /** Pairs of (sourceId, supersededById) that were applied */
+  supersededPairs: Array<{ sourceId: string; supersededById: string }>;
+  /** IDs of memories that had sleepCycles incremented */
+  sleepCycleIncrementedIds: string[];
+  /** Duration of reconsolidation execution in milliseconds */
+  durationMs: number;
+  /** Optional notes or warnings from execution */
+  notes?: string;
+}
+
 // Tool result types
 export interface MemorizeResult {
   status: 'ok' | 'error';
@@ -252,6 +306,8 @@ export interface RecallResult {
   searchStatus?: SearchStatus;
   /** Detailed diagnostics from search operations */
   searchDiagnostics?: SearchDiagnostics[];
+  /** Reconsolidation report if enableReconsolidation was true and consolidation occurred */
+  consolidationReport?: ConsolidationReport;
 }
 
 export interface ForgetResult {

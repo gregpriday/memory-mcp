@@ -9,6 +9,7 @@ import {
   SearchDiagnostics,
   Importance,
   Relationship,
+  MemoryType,
 } from './types.js';
 import { IMemoryRepository, DatabaseInfo, IndexInfo, IndexSummary } from './IMemoryRepository.js';
 import { PoolManager } from './PoolManager.js';
@@ -1699,5 +1700,142 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       pendingDocumentCount: 0, // Postgres doesn't have pending documents
       description: row.description ?? undefined,
     }));
+  }
+
+  /**
+   * Increment the sleepCycles counter on specified memories.
+   * Used during reconsolidation to track memories that were processed.
+   */
+  async incrementSleepCycles(
+    indexName: string,
+    ids: string[],
+    amount: number = 1
+  ): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+
+    try {
+      // Resolve index ID to ensure we only update memories in this index
+      const indexResult = await this.pool.query<{ id: string }>(
+        'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
+        [this.projectId, indexName]
+      );
+
+      if (indexResult.rows.length === 0) {
+        debugLog('reconsolidation', `Index ${indexName} not found for incrementSleepCycles`);
+        return 0;
+      }
+
+      const indexId = indexResult.rows[0].id;
+
+      // Update memories to increment sleep_cycles in both metadata JSONB and denormalized column
+      const updateQuery = `
+        UPDATE memories
+        SET
+          metadata = jsonb_set(
+            COALESCE(metadata, '{}'::jsonb),
+            '{dynamics,sleepCycles}',
+            to_jsonb(COALESCE((metadata->'dynamics'->>'sleepCycles')::int, 0) + $1)
+          ),
+          sleep_cycles = COALESCE(sleep_cycles, 0) + $1,
+          updated_at = NOW()
+        WHERE id = ANY($2::text[])
+          AND index_id = $3
+          AND project = $4
+        RETURNING id
+      `;
+
+      const result = await this.pool.query<{ id: string }>(updateQuery, [
+        amount,
+        ids,
+        indexId,
+        this.projectId,
+      ]);
+
+      debugLog(
+        'reconsolidation',
+        `Incremented sleepCycles by ${amount} for ${result.rows.length} memories`
+      );
+
+      return result.rows.length;
+    } catch (error) {
+      const errorInfo = this.mapPostgresError(error);
+      debugLog('reconsolidation', `Error incrementing sleepCycles: ${errorInfo.message}`);
+      // Don't throw - log and continue
+      return 0;
+    }
+  }
+
+  /**
+   * Mark memories as superseded by other memories.
+   * Used during reconsolidation when derived memories replace older memories.
+   */
+  async markMemoriesSuperseded(
+    indexName: string,
+    pairs: Array<{ sourceId: string; supersededById: string | number }>
+  ): Promise<number> {
+    if (pairs.length === 0) {
+      return 0;
+    }
+
+    try {
+      // Resolve index ID to ensure we only update memories in this index
+      const indexResult = await this.pool.query<{ id: string }>(
+        'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
+        [this.projectId, indexName]
+      );
+
+      if (indexResult.rows.length === 0) {
+        debugLog('reconsolidation', `Index ${indexName} not found for markMemoriesSuperseded`);
+        return 0;
+      }
+
+      const indexId = indexResult.rows[0].id;
+
+      // Build a temporary table with the pairs to avoid N+1 queries
+      // Using UNNEST to create a table expression
+      // Convert all supersededById values to strings for SQL
+      const sourceIds = pairs.map((p) => p.sourceId);
+      const supersededByIds = pairs.map((p) => String(p.supersededById));
+
+      const updateQuery = `
+        UPDATE memories
+        SET
+          metadata = jsonb_set(
+            COALESCE(metadata, '{}'::jsonb),
+            '{supersededById}',
+            to_jsonb(pairs.superseded_by_id)
+          ),
+          superseded_by_id = pairs.superseded_by_id,
+          updated_at = NOW()
+        FROM (
+          SELECT unnest($1::text[]) AS source_id, unnest($2::text[]) AS superseded_by_id
+        ) AS pairs
+        WHERE memories.id = pairs.source_id
+          AND memories.index_id = $3
+          AND memories.project = $4
+        RETURNING memories.id
+      `;
+
+      const result = await this.pool.query<{ id: string }>(updateQuery, [
+        sourceIds,
+        supersededByIds,
+        indexId,
+        this.projectId,
+      ]);
+
+      debugLog(
+        'reconsolidation',
+        `Marked ${result.rows.length} memories as superseded in index ${indexName}`
+      );
+
+      return result.rows.length;
+    } catch (error) {
+      const errorInfo = this.mapPostgresError(error);
+      debugLog('reconsolidation', `Error marking memories as superseded: ${errorInfo.message}`);
+      // Don't throw - log and continue
+      return 0;
+    }
   }
 }
