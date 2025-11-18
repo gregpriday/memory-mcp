@@ -2,6 +2,12 @@ import OpenAI from 'openai';
 import type { EmbeddingCreateParams } from 'openai/resources/embeddings';
 
 /**
+ * Models that support the dimensions parameter.
+ * Legacy models like text-embedding-ada-002 do not support this parameter.
+ */
+const MODELS_SUPPORTING_DIMENSIONS = new Set(['text-embedding-3-small', 'text-embedding-3-large']);
+
+/**
  * EmbeddingService
  * Wrapper around OpenAI SDK for text embeddings with batching support
  */
@@ -9,6 +15,7 @@ export class EmbeddingService {
   private openai: OpenAI;
   private model: string;
   private expectedDimensions: number;
+  private supportsDimensions: boolean;
 
   /**
    * @param apiKey OpenAI API key
@@ -19,6 +26,7 @@ export class EmbeddingService {
     this.openai = new OpenAI({ apiKey });
     this.model = model;
     this.expectedDimensions = expectedDimensions;
+    this.supportsDimensions = MODELS_SUPPORTING_DIMENSIONS.has(model);
   }
 
   /**
@@ -30,12 +38,19 @@ export class EmbeddingService {
    */
   async embedText(text: string): Promise<number[]> {
     try {
-      const response = await this.openai.embeddings.create({
+      // Build request params conditionally based on model support
+      const params: EmbeddingCreateParams = {
         model: this.model,
         input: text,
         encoding_format: 'float',
-        dimensions: this.expectedDimensions,
-      });
+      };
+
+      // Only include dimensions for models that support it
+      if (this.supportsDimensions) {
+        params.dimensions = this.expectedDimensions;
+      }
+
+      const response = await this.openai.embeddings.create(params);
 
       const embedding = response.data[0].embedding;
 
@@ -79,12 +94,19 @@ export class EmbeddingService {
     }
 
     try {
-      const response = await this.openai.embeddings.create({
+      // Build request params conditionally based on model support
+      const params: EmbeddingCreateParams = {
         model: this.model,
         input: texts,
         encoding_format: 'float',
-        dimensions: this.expectedDimensions,
-      });
+      };
+
+      // Only include dimensions for models that support it
+      if (this.supportsDimensions) {
+        params.dimensions = this.expectedDimensions;
+      }
+
+      const response = await this.openai.embeddings.create(params);
 
       const embeddings = response.data.map((item) => item.embedding);
 

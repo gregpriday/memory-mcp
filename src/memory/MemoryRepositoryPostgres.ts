@@ -155,6 +155,30 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       );
     }
 
+    // Fetch existing metadata for updates (memories with IDs)
+    const existingMetadataMap = new Map<string, any>();
+    const updateIds = memories.filter((m) => m.id).map((m) => m.id!);
+
+    if (updateIds.length > 0) {
+      const existingQuery = `
+        SELECT id, metadata
+        FROM memories
+        WHERE id = ANY($1::text[])
+          AND index_id = $2
+          AND project = $3
+      `;
+
+      const existingResult = await this.pool.query<{ id: string; metadata: any }>(existingQuery, [
+        updateIds,
+        indexId,
+        this.projectId,
+      ]);
+
+      for (const row of existingResult.rows) {
+        existingMetadataMap.set(row.id, row.metadata || {});
+      }
+    }
+
     // Prepare batch insert with ON CONFLICT
     const values: any[] = [];
     const memoryIds: string[] = [];
@@ -167,8 +191,10 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       const memoryId = memory.id || this.generateId();
       memoryIds.push(memoryId);
 
-      // Merge metadata
+      // Merge metadata: existing → default → new (only provided fields are modified)
+      const existingMetadata = existingMetadataMap.get(memoryId) || {};
       const fullMetadata = {
+        ...existingMetadata,
         ...defaultMetadata,
         ...memory.metadata,
         index: indexName,
@@ -228,7 +254,7 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       const sourcePath = fullMetadata.sourcePath || null;
       const kind = fullMetadata.kind || 'raw';
       const derivedFromIds = fullMetadata.derivedFromIds
-        ? fullMetadata.derivedFromIds.map((id) => id)
+        ? fullMetadata.derivedFromIds.map((id: string) => id)
         : null;
       const supersededById = fullMetadata.supersededById || null;
 
@@ -369,10 +395,11 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       await client.query('BEGIN');
 
       // Delete existing relationships only for memory IDs that explicitly provided relationships
+      // Include index_id filter to prevent cross-index deletions
       await client.query(
         `DELETE FROM memory_relationships
-         WHERE project = $1 AND source_id = ANY($2::text[])`,
-        [this.projectId, idsWithRelationships]
+         WHERE project = $1 AND index_id = $2 AND source_id = ANY($3::text[])`,
+        [this.projectId, indexId, idsWithRelationships]
       );
 
       // Insert new relationships if any exist
@@ -382,12 +409,13 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
         for (let i = 0; i < relationshipsToInsert.length; i++) {
           const rel = relationshipsToInsert[i];
-          const offset = i * 6 + 1;
+          const offset = i * 7 + 1;
           placeholders.push(
-            `($${offset}, $${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5})`
+            `($${offset}, $${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`
           );
           values.push(
             this.projectId,
+            indexId,
             rel.sourceId,
             rel.targetId,
             rel.type,
@@ -397,9 +425,9 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
         }
 
         const insertQuery = `
-          INSERT INTO memory_relationships (project, source_id, target_id, relationship_type, confidence, metadata)
+          INSERT INTO memory_relationships (project, index_id, source_id, target_id, relationship_type, confidence, metadata)
           VALUES ${placeholders.join(', ')}
-          ON CONFLICT (source_id, target_id, relationship_type)
+          ON CONFLICT (source_id, target_id, relationship_type, index_id)
           DO UPDATE SET
             confidence = EXCLUDED.confidence,
             metadata = EXCLUDED.metadata
@@ -431,7 +459,28 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
     const memoryIds = memories.map((m) => m.id);
     const memoryIdSet = new Set(memoryIds); // Performance: O(1) lookups instead of O(n)
 
-    // Fetch all relationships (both outgoing and incoming) for these memory IDs
+    // Get index_id from the first memory's metadata (all memories in a batch should be from the same index)
+    // If we can't determine the index, we need to fetch it from the database
+    const indexName = memories[0].metadata?.index;
+    if (!indexName) {
+      // No index information, skip relationship population
+      return;
+    }
+
+    // Resolve index ID
+    const indexResult = await this.pool.query<{ id: string }>(
+      'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
+      [this.projectId, indexName]
+    );
+
+    if (indexResult.rows.length === 0) {
+      // Index not found, skip relationship population
+      return;
+    }
+
+    const indexId = indexResult.rows[0].id;
+
+    // Fetch all relationships (both outgoing and incoming) for these memory IDs within this index
     const result = await this.pool.query<{
       source_id: string;
       target_id: string;
@@ -440,8 +489,8 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
     }>(
       `SELECT source_id, target_id, relationship_type, confidence
        FROM memory_relationships
-       WHERE project = $1 AND (source_id = ANY($2::text[]) OR target_id = ANY($2::text[]))`,
-      [this.projectId, memoryIds]
+       WHERE project = $1 AND index_id = $2 AND (source_id = ANY($3::text[]) OR target_id = ANY($3::text[]))`,
+      [this.projectId, indexId, memoryIds]
     );
 
     // Build maps for outgoing and incoming relationships
@@ -517,38 +566,123 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
       return;
     }
 
-    // Use accessPriorityBoost from config if not provided in options
-    const priorityBoost = options?.priorityBoost ?? config.accessPriorityBoost;
+    // Resolve index ID to ensure we only update memories in this index
+    const indexResult = await this.pool.query<{ id: string }>(
+      'SELECT id FROM memory_indexes WHERE project = $1 AND name = $2',
+      [this.projectId, indexName]
+    );
 
-    // Batch update using ANY - update both denormalized columns AND metadata JSONB
-    // IMPORTANT: Sync JSONB dynamics.accessCount from the authoritative column to prevent drift
-    const query = `
-      UPDATE memories
-      SET
-        last_accessed_at = NOW(),
-        access_count = access_count + 1,
-        current_priority = LEAST(1.0, current_priority + $1),
-        metadata = jsonb_set(
-          jsonb_set(
-            jsonb_set(
-              COALESCE(metadata, '{}'::jsonb),
-              '{dynamics,lastAccessedAt}',
-              to_jsonb(NOW()::text),
-              true
-            ),
-            '{dynamics,accessCount}',
-            to_jsonb(access_count + 1),
-            true
-          ),
-          '{dynamics,currentPriority}',
-          to_jsonb(LEAST(1.0, current_priority + $1)),
-          true
-        ),
-        updated_at = NOW()
-      WHERE id = ANY($2::text[])
+    if (indexResult.rows.length === 0) {
+      debugLog('access', `Index ${indexName} not found, skipping updateAccessStats`);
+      return;
+    }
+
+    const indexId = indexResult.rows[0].id;
+
+    // Fetch existing memories to recalculate priority using PriorityCalculator
+    const selectQuery = `
+      SELECT id, content, created_at, metadata, memory_type
+      FROM memories
+      WHERE index_id = $1
+        AND project = $2
+        AND id = ANY($3::text[])
     `;
 
-    await this.pool.query(query, [priorityBoost, idsToUpdate]);
+    const result = await this.pool.query<{
+      id: string;
+      content: string;
+      created_at: Date;
+      metadata: any;
+      memory_type: string;
+    }>(selectQuery, [indexId, this.projectId, idsToUpdate]);
+
+    if (result.rows.length === 0) {
+      return;
+    }
+
+    const now = new Date();
+
+    // Build update for each memory with recalculated priority
+    for (const row of result.rows) {
+      const currentMetadata = row.metadata || {};
+      const currentDynamics = currentMetadata.dynamics || {};
+
+      // Increment access count
+      const newAccessCount = (currentDynamics.accessCount || 0) + 1;
+      const newMaxAccessCount = Math.max(currentDynamics.maxAccessCount || 0, newAccessCount);
+
+      // Build temporary memory record for priority calculation
+      const tempMemory: MemoryRecord = {
+        id: row.id,
+        content: {
+          text: row.content,
+          timestamp: row.created_at.toISOString(),
+        },
+        metadata: {
+          ...currentMetadata,
+          memoryType: row.memory_type as any,
+          dynamics: {
+            ...currentDynamics,
+            accessCount: newAccessCount,
+            maxAccessCount: newMaxAccessCount,
+            lastAccessedAt: now.toISOString(),
+          },
+        },
+      };
+
+      // Recalculate priority using PriorityCalculator
+      const newPriority = computeTypeDependentPriority(tempMemory, now);
+
+      // Update the memory with new access stats and recalculated priority
+      const updateQuery = `
+        UPDATE memories
+        SET
+          last_accessed_at = $1,
+          access_count = $2,
+          max_access_count = $3,
+          current_priority = $4,
+          metadata = jsonb_set(
+            jsonb_set(
+              jsonb_set(
+                jsonb_set(
+                  COALESCE(metadata, '{}'::jsonb),
+                  '{dynamics,lastAccessedAt}',
+                  to_jsonb($1::text),
+                  true
+                ),
+                '{dynamics,accessCount}',
+                to_jsonb($2),
+                true
+              ),
+              '{dynamics,maxAccessCount}',
+              to_jsonb($3),
+              true
+            ),
+            '{dynamics,currentPriority}',
+            to_jsonb($4),
+            true
+          ),
+          updated_at = $1
+        WHERE id = $5
+          AND index_id = $6
+          AND project = $7
+      `;
+
+      await this.pool.query(updateQuery, [
+        now,
+        newAccessCount,
+        newMaxAccessCount,
+        newPriority,
+        row.id,
+        indexId,
+        this.projectId,
+      ]);
+
+      debugLog(
+        'access',
+        `Updated access stats for ${row.id}: accessCount=${newAccessCount}, priority=${newPriority.toFixed(3)}`
+      );
+    }
   }
 
   /**
@@ -829,6 +963,11 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
     // Populate relationships from memory_relationships table
     await this.populateRelationships([memory]);
 
+    // Update access stats (fire-and-forget)
+    this.updateAccessStats(indexName, [id]).catch((err) => {
+      debugLog('access', `Failed to update access stats for ${id}:`, err);
+    });
+
     return memory;
   }
 
@@ -879,6 +1018,12 @@ export class MemoryRepositoryPostgres implements IMemoryRepository {
 
     // Populate relationships from memory_relationships table
     await this.populateRelationships(memories);
+
+    // Update access stats (fire-and-forget)
+    const memoryIds = memories.map((m) => m.id);
+    this.updateAccessStats(indexName, memoryIds).catch((err) => {
+      debugLog('access', `Failed to update access stats for ${memoryIds.length} memories:`, err);
+    });
 
     return memories;
   }

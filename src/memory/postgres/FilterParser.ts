@@ -7,7 +7,7 @@
  *
  * @remarks
  * **DSL Syntax:**
- * - Supported operators: `=`, `==` (equivalent to `=`), `CONTAINS`
+ * - Supported operators: `=`, `==` (equivalent to `=`), `!=`, `>`, `<`, `>=`, `<=`, `CONTAINS`
  * - Supported types: Strings (double-quoted), Numbers, Booleans (`true`, `false`)
  * - Logical operators: `AND`, `OR`, parentheses for grouping
  * - Field access: `@id` for memory ID, `@metadata.fieldName` for metadata properties
@@ -40,7 +40,7 @@
  * Primary := '(' Expression ')' | Comparison
  * Comparison := Field Operator Literal
  * Field := '@id' | '@metadata' | '@metadata.' Identifier
- * Operator := '=' | '==' | 'CONTAINS'
+ * Operator := '=' | '==' | '!=' | '>' | '<' | '>=' | '<=' | 'CONTAINS'
  * Literal := String | Number | Boolean
  * ```
  *
@@ -62,7 +62,7 @@ export interface LogicalNode {
 
 export interface ComparisonNode {
   type: 'comparison';
-  operator: '=' | '==' | 'CONTAINS';
+  operator: '=' | '==' | 'CONTAINS' | '>' | '<' | '>=' | '<=' | '!=';
   field: FieldNode;
   value: LiteralNode;
 }
@@ -247,7 +247,7 @@ class Tokenizer {
         continue;
       }
 
-      // Operators (=, ==)
+      // Operators (=, ==, !=, >, <, >=, <=)
       if (ch === '=') {
         this.advance();
         if (this.peek() === '=') {
@@ -255,6 +255,39 @@ class Tokenizer {
           tokens.push({ type: 'OPERATOR', value: '==', position: startPos });
         } else {
           tokens.push({ type: 'OPERATOR', value: '=', position: startPos });
+        }
+        continue;
+      }
+
+      if (ch === '!') {
+        this.advance();
+        if (this.peek() === '=') {
+          this.advance();
+          tokens.push({ type: 'OPERATOR', value: '!=', position: startPos });
+        } else {
+          throw new Error(`Unexpected character '!' at position ${startPos}. Did you mean '!='?`);
+        }
+        continue;
+      }
+
+      if (ch === '>') {
+        this.advance();
+        if (this.peek() === '=') {
+          this.advance();
+          tokens.push({ type: 'OPERATOR', value: '>=', position: startPos });
+        } else {
+          tokens.push({ type: 'OPERATOR', value: '>', position: startPos });
+        }
+        continue;
+      }
+
+      if (ch === '<') {
+        this.advance();
+        if (this.peek() === '=') {
+          this.advance();
+          tokens.push({ type: 'OPERATOR', value: '<=', position: startPos });
+        } else {
+          tokens.push({ type: 'OPERATOR', value: '<', position: startPos });
         }
         continue;
       }
@@ -390,8 +423,11 @@ class Parser {
     const field = this.parseField(fieldToken.value as string);
 
     // Parse operator
-    const opToken = this.expect('OPERATOR', 'Expected operator (=, ==, CONTAINS)');
-    const operator = opToken.value as '=' | '==' | 'CONTAINS';
+    const opToken = this.expect(
+      'OPERATOR',
+      'Expected operator (=, ==, !=, >, <, >=, <=, CONTAINS)'
+    );
+    const operator = opToken.value as '=' | '==' | '!=' | '>' | '<' | '>=' | '<=' | 'CONTAINS';
 
     // Parse literal
     const literal = this.parseLiteral();
@@ -527,9 +563,14 @@ class SQLTranslator {
       const denormalized = DENORMALIZED_COLUMNS[field.name];
 
       if (denormalized) {
-        return this.translateDenormalizedField(denormalized, normalizedOp, value, field.name);
+        return this.translateDenormalizedField(
+          denormalized,
+          normalizedOp as any,
+          value,
+          field.name
+        );
       } else {
-        return this.translateJSONBField(field.name, normalizedOp, value);
+        return this.translateJSONBField(field.name, normalizedOp as any, value);
       }
     }
 
@@ -538,7 +579,7 @@ class SQLTranslator {
 
   private translateDenormalizedField(
     columnInfo: { column: string; type: 'text' | 'integer' | 'array' },
-    operator: '=' | 'CONTAINS',
+    operator: '=' | '!=' | '>' | '<' | '>=' | '<=' | 'CONTAINS',
     value: LiteralNode,
     fieldName: string
   ): string {
@@ -546,7 +587,7 @@ class SQLTranslator {
 
     // Special handling for importance: map string values to integers
     if (fieldName === 'importance' && typeof value.value === 'string') {
-      // Importance is an integer field, only equality is supported
+      // Importance is an integer field
       if (operator === 'CONTAINS') {
         throw new Error(
           `CONTAINS operator only supported for array fields. Field ${fieldName} is ${type}`
@@ -576,14 +617,14 @@ class SQLTranslator {
       return `${paramPlaceholder} = ANY(${column})`;
     }
 
-    // Array equality (not typical, but supported)
-    if (type === 'array' && operator === '=') {
+    // Array fields don't support inequality/equality
+    if (type === 'array' && operator !== 'CONTAINS') {
       throw new Error(
-        `Equality comparison not supported for array field ${fieldName}. Use CONTAINS instead.`
+        `Operator ${operator} not supported for array field ${fieldName}. Use CONTAINS instead.`
       );
     }
 
-    // Regular equality
+    // Regular comparison operators
     if (operator === 'CONTAINS') {
       throw new Error(
         `CONTAINS operator only supported for array fields. Field ${fieldName} is ${type}`
@@ -596,7 +637,7 @@ class SQLTranslator {
 
   private translateJSONBField(
     fieldName: string,
-    operator: '=' | 'CONTAINS',
+    operator: '=' | '!=' | '>' | '<' | '>=' | '<=' | 'CONTAINS',
     value: LiteralNode
   ): string {
     // JSONB access for custom metadata fields
@@ -612,6 +653,19 @@ class SQLTranslator {
       const jsonValue = JSON.stringify([value.value]);
       const paramPlaceholder = this.addParam(jsonValue);
       return `metadata->'${this.sanitizeJsonbKey(fieldName)}' @> ${paramPlaceholder}::jsonb`;
+    }
+
+    // For numeric comparisons on JSONB fields, cast to appropriate type
+    if (typeof value.value === 'number' && ['>', '<', '>=', '<=', '!=', '='].includes(operator)) {
+      // Extract as numeric: (metadata->>'fieldName')::numeric > value
+      const paramPlaceholder = this.addParam(value.value);
+      return `(metadata->>'${this.sanitizeJsonbKey(fieldName)}')::numeric ${operator} ${paramPlaceholder}`;
+    }
+
+    // For boolean comparisons, cast to boolean
+    if (typeof value.value === 'boolean' && ['=', '!='].includes(operator)) {
+      const paramPlaceholder = this.addParam(value.value);
+      return `(metadata->>'${this.sanitizeJsonbKey(fieldName)}')::boolean ${operator} ${paramPlaceholder}`;
     }
 
     // Text extraction: metadata->>'fieldName' = 'value'
