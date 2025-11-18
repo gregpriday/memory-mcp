@@ -14,6 +14,8 @@ import type {
   ListIndexesResult,
   MemorizeToolArgs,
   MemorizeResult,
+  RefineMemoriesToolArgs,
+  RefineMemoriesResult,
   RecallToolArgs,
   RecallResult,
   ScanMemoriesToolArgs,
@@ -171,6 +173,14 @@ export class TestServerHarness {
   async callMemorize(args: MemorizeToolArgs): Promise<MemorizeResult> {
     const mcpResponse = await this.controller.handleMemorizeTool(args);
     return this.parseJsonResponse<MemorizeResult>(mcpResponse);
+  }
+
+  /**
+   * Call refine_memories tool and return parsed result.
+   */
+  async callRefineMemories(args: RefineMemoriesToolArgs): Promise<RefineMemoriesResult> {
+    const mcpResponse = await this.controller.handleRefineMemoriesTool(args);
+    return this.parseJsonResponse<RefineMemoriesResult>(mcpResponse);
   }
 
   /**
