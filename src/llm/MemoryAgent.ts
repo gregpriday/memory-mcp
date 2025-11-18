@@ -1511,7 +1511,7 @@ export class MemoryAgent {
         name: summary.name,
         documentCount: summary.documentCount,
         pendingDocumentCount: summary.pendingDocumentCount ?? 0,
-        description: undefined,
+        description: summary.description,
         project: this.projectId,
       }));
 
