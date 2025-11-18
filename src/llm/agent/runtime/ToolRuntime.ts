@@ -12,10 +12,62 @@ interface ToolRuntimeConfig {
 }
 
 /**
- * ToolRuntime encapsulates the LLM tool-calling runtime:
- * - Tool definition (discovery)
- * - Tool execution
- * - Tool-calling loop orchestration
+ * ToolRuntime - Internal Tool System for Memory Agent
+ *
+ * Encapsulates the LLM tool-calling runtime that powers the memory agent.
+ * Provides a set of internal tools that the LLM can call to interact with
+ * memory storage, files, and analysis capabilities.
+ *
+ * **Responsibilities:**
+ * - **Tool Definition**: Defines available tools with JSON Schema parameters
+ * - **Tool Execution**: Routes tool calls to appropriate backend implementations
+ * - **Mode-Based Access Control**: Restricts tools based on operation mode
+ * - **Loop Orchestration**: Manages multi-turn tool-calling conversations
+ *
+ * **Available Tools:**
+ * - `search_memories`: Semantic search across memory indexes
+ * - `get_memories`: Fetch specific memories by ID (for relationship traversal)
+ * - `upsert_memories`: Store or update memories
+ * - `delete_memories`: Remove memories (only in normal mode)
+ * - `read_file`: Read project files with sandboxing
+ * - `analyze_text`: Extract metadata and facts using GPT-4-mini
+ *
+ * **Operation Modes:**
+ * - **normal**: All tools available (full read/write access)
+ * - **forget-dryrun**: Read-only tools only (preview before deletion)
+ * - **refinement-planning**: Read-only tools only (analyze without mutation)
+ *
+ * @remarks
+ * The runtime enforces safety limits:
+ * - Maximum tool iterations (default: 10) to prevent infinite loops
+ * - Maximum search iterations (default: 3) to encourage result synthesis
+ * - Forget confidence thresholds to prevent accidental bulk deletion
+ *
+ * Tool schemas are compatible with OpenAI's function calling API and Anthropic's tool use.
+ *
+ * @example
+ * ```typescript
+ * const runtime = new ToolRuntime(llm, prompts, repo, fileLoader, {
+ *   maxToolIterations: 10,
+ *   maxSearchIterations: 3
+ * });
+ *
+ * // Get tools for specific operation mode
+ * const tools = runtime.getInternalTools('normal');
+ * // Returns all 6 tools including delete_memories
+ *
+ * const readOnlyTools = runtime.getInternalTools('refinement-planning');
+ * // Returns only 4 read-only tools (search, get, read_file, analyze)
+ *
+ * // Execute a tool call
+ * const result = await runtime.executeInternalTool('search_memories', {
+ *   index: 'chat-history',
+ *   query: 'user preferences',
+ *   limit: 5
+ * }, context);
+ * ```
+ *
+ * @public
  */
 export class ToolRuntime {
   private maxToolIterations: number;
@@ -33,15 +85,54 @@ export class ToolRuntime {
   }
 
   /**
-   * Define internal tools available to the LLM
-   * Conditionally excludes delete_memories in dry-run mode
-   * Restricts to read-only tools in refinement-planning mode
+   * Get internal tools available to the LLM for a specific operation mode.
+   *
+   * Returns a filtered set of tool definitions based on the operation mode,
+   * implementing access control to prevent mutations during read-only operations.
+   *
+   * @param operationMode - The current operation mode determining tool availability
+   *   - `'normal'`: Full access to all 6 tools (including delete_memories)
+   *   - `'forget-dryrun'`: Read-only preview mode (search, get, read, analyze only)
+   *   - `'refinement-planning'`: Analysis mode (search, get, read, analyze only)
+   *
+   * @returns Array of tool definitions with JSON Schema parameters
+   *
+   * @remarks
+   * **Tool Filtering by Mode:**
+   * - Normal mode: All tools (search, get, upsert, delete, read_file, analyze)
+   * - Dry-run/Planning modes: Read-only tools only (search, get, read_file, analyze)
+   *
+   * **Tool Purposes:**
+   * - `search_memories`: Primary retrieval method using semantic similarity
+   * - `get_memories`: Follow relationships between memories via IDs
+   * - `upsert_memories`: Store new memories or update existing ones
+   * - `delete_memories`: Remove memories (excluded in safe modes)
+   * - `read_file`: Access project files with path sandboxing
+   * - `analyze_text`: Fast metadata extraction using GPT-4-mini
+   *
+   * Tool definitions conform to JSON Schema and are compatible with both
+   * OpenAI function calling and Anthropic tool use APIs.
+   *
+   * @example
+   * ```typescript
+   * // Normal operation - all tools available
+   * const allTools = runtime.getInternalTools('normal');
+   * console.log(allTools.map(t => t.name));
+   * // Output: ['search_memories', 'get_memories', 'delete_memories',
+   * //          'upsert_memories', 'read_file', 'analyze_text']
+   *
+   * // Refinement planning - read-only tools
+   * const readOnly = runtime.getInternalTools('refinement-planning');
+   * console.log(readOnly.map(t => t.name));
+   * // Output: ['search_memories', 'get_memories', 'read_file', 'analyze_text']
+   * ```
    */
   getInternalTools(operationMode: 'normal' | 'forget-dryrun' | 'refinement-planning'): ToolDef[] {
     const tools: ToolDef[] = [
       {
         name: 'search_memories',
-        description: 'Search for memories using semantic search in the specified index',
+        description:
+          'Search for memories using semantic similarity matching. Combines embedding-based semantic search with optional keyword matching and metadata filtering. Returns relevance-ranked results. Use this as the primary method for finding relevant memories based on meaning, not exact keywords.',
         parameters: {
           type: 'object',
           properties: {
@@ -76,7 +167,7 @@ export class ToolRuntime {
       {
         name: 'get_memories',
         description:
-          'Fetch memories by their IDs to follow explicit relationships or inspect neighbors in the graph',
+          'Fetch specific memories by their unique IDs. Use this to follow explicit relationships between memories (e.g., relatedMemories field) or to inspect memories discovered through search. Returns full memory records including all metadata and content. More efficient than search when you already know the exact IDs.',
         parameters: {
           type: 'object',
           properties: {
@@ -95,7 +186,8 @@ export class ToolRuntime {
       },
       {
         name: 'upsert_memories',
-        description: 'Store or update memories in the specified index',
+        description:
+          'Store new memories or update existing ones in the index. Automatically generates embeddings for semantic search. Use for creating memories from user input, file content, or analysis results. Supports batch operations and default metadata for efficient bulk storage. Returns memory IDs for later reference.',
         parameters: {
           type: 'object',
           properties: {
@@ -125,7 +217,8 @@ export class ToolRuntime {
       },
       {
         name: 'read_file',
-        description: 'Read a text file from the project directory (relative path only)',
+        description:
+          'Read text files from the project directory. Only relative paths within the project are allowed (sandboxed). Use this to ingest file content for memorization, verify file-based memories, or extract information from project files. Supports text formats including code, markdown, JSON, etc.',
         parameters: {
           type: 'object',
           properties: {
@@ -140,7 +233,7 @@ export class ToolRuntime {
       {
         name: 'analyze_text',
         description:
-          'Analyze text to extract key facts, metadata, topics, and tags using memory analysis expertise',
+          'Analyze text using GPT-4-mini to extract key facts, suggested metadata (topics, tags, importance, memory type), and structural information. Use this to prepare text for memorization by identifying discrete facts and appropriate metadata. Fast and cost-effective for bulk analysis. Returns structured analysis results including suggested memory segmentation.',
         parameters: {
           type: 'object',
           properties: {
@@ -170,7 +263,8 @@ export class ToolRuntime {
     // (upsert_memories was already included in the base tools array above)
     tools.splice(2, 0, {
       name: 'delete_memories',
-      description: 'Delete memories by their IDs',
+      description:
+        'Permanently delete memories by their IDs. Use with caution - this operation cannot be undone. Only available in normal operation mode (excluded from dry-run and planning modes). Prefer forgetting low-priority or outdated memories rather than bulk deletion.',
       parameters: {
         type: 'object',
         properties: {
