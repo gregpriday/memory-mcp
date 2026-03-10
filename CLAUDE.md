@@ -4,8 +4,9 @@ A memory MCP server that stores and retrieves memories using Turso (libSQL) with
 
 ## Architecture
 
-- **MCP Tools**: `remember`, `forget`, `recall`, `process` - all take plain English + a table name
+- **MCP Tools**: `remember`, `forget`, `recall`, `process`, `process_answers` - all take plain English + a table name
 - **LLM Layer** (`src/llm.ts`): Uses OpenAI (gpt-5) with function calling to translate natural language into database operations
+- **System Prompts** (`src/prompts/*.txt`): Maintainable prompt files loaded at runtime, one per operation
 - **Embeddings** (`src/embeddings.ts`): Uses text-embedding-3-small (1536 dimensions) for semantic search
 - **Database** (`src/db.ts`): Turso/libSQL with FLOAT32 vector columns and DiskANN indexes
 - **Table Setup** (`src/table-setup.ts`): Creates memory tables with core + freeform columns
@@ -18,9 +19,11 @@ A memory MCP server that stores and retrieves memories using Turso (libSQL) with
 
 ## Commands
 
-- `npm run build` - Compile TypeScript
+- `npm run build` - Compile TypeScript and copy prompt files
 - `npm run dev` - Run with tsx (development)
-- `npm test` - Run tests with vitest
+- `npm test` - Run unit tests
+- `npm run test:integration` - Run integration tests (requires OPENAI_API_KEY)
+- `npm run test:all` - Run all tests
 - `npm start` - Run compiled server
 
 ## Claude Code Commands

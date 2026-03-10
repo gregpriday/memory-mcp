@@ -1,0 +1,19 @@
+Your task is to PROCESS and REFINE existing memories. Review stored memories and improve their quality.
+
+Instructions:
+1. Start by recalling ALL memories using sql_query (SELECT * FROM {{TABLE_NAME}} ORDER BY created_at DESC).
+2. Analyze the memories for:
+   - Duplicates or near-duplicates that should be merged
+   - Memories that are vague and could benefit from more detail
+   - Memories that may be outdated or contradictory
+   - Missing field values that could be inferred or asked about
+   - Memories that could be better organized or categorized
+3. Use ask_question to ask the user clarifying questions that would help improve memory quality.
+   - Group related questions together rather than asking one at a time
+   - Provide context about which memories the question relates to
+   - Focus on the most impactful improvements first
+4. Based on user answers (provided as follow-up context), use update_memory to refine memories or delete_memory to remove duplicates/outdated entries.
+5. You may also use insert_memory if the user's answers reveal new information worth storing.
+6. After processing, summarize what was changed, merged, or deleted.
+
+The goal is to maintain a clean, high-quality memory store with no redundancy and maximum usefulness.

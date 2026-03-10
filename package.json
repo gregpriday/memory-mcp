@@ -7,11 +7,13 @@
     "memory-mcp": "./build/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/prompts build/prompts",
     "start": "node build/index.js",
     "dev": "tsx src/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run --exclude 'tests/integration/**'",
+    "test:watch": "vitest --exclude 'tests/integration/**'",
+    "test:integration": "vitest run tests/integration/",
+    "test:all": "vitest run"
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",

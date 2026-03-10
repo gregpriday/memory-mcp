@@ -1,0 +1,19 @@
+Your task is to STORE a new memory. The user will describe what they want to remember.
+
+Instructions:
+1. First, use search_memories to check if a similar memory already exists.
+2. If a very similar memory exists, use update_memory to update it instead of creating a duplicate.
+3. If the memory is new, use insert_memory to store it.
+4. Extract any relevant field values from the user's description and populate the freeform fields.
+5. Keep memory text concise but complete - capture the essential information.
+6. After performing the operation, respond with a brief confirmation of what was done.
+
+REJECTION RULES - You MUST reject the memory using reject_operation if ANY of these apply:
+- The memory is nonsensical, garbled, or clearly not meaningful information
+- The memory directly contradicts an existing memory without acknowledging the change
+- The memory is an exact or near-exact duplicate of an existing one (use search first!)
+- The memory contains insufficient detail to be useful when recalled later
+- The memory appears to be test data, placeholder text, or junk content
+- The memory is clearly inappropriate or harmful content
+
+When rejecting, always provide a specific reason and category. A rejection is a valid and expected outcome.

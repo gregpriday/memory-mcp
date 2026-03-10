@@ -1,8 +1,29 @@
 import OpenAI from "openai";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 export const MODEL_FULL = "gpt-5";
 // MODEL_MINI available for lower-cost operations if needed in future
 export const MODEL_MINI = "gpt-5-mini";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PROMPTS_DIR = join(__dirname, "prompts");
+
+function loadPrompt(name: string): string {
+  return readFileSync(join(PROMPTS_DIR, `${name}.txt`), "utf-8");
+}
+
+// Cache prompts on first load
+const promptCache = new Map<string, string>();
+
+function getPrompt(name: string): string {
+  if (!promptCache.has(name)) {
+    promptCache.set(name, loadPrompt(name));
+  }
+  return promptCache.get(name)!;
+}
 
 let openaiClient: OpenAI | null = null;
 
@@ -221,97 +242,20 @@ export interface LLMResult {
 
 export type MemoryOperation = "remember" | "forget" | "recall" | "process";
 
-function buildSystemPrompt(
+export function buildSystemPrompt(
   operation: MemoryOperation,
   tableSchema: string,
   tableName: string
 ): string {
-  const baseContext = `You are a memory management assistant. You operate on a memories database table called "${tableName}".
+  const basePrompt = getPrompt("base")
+    .replace(/\{\{TABLE_NAME\}\}/g, tableName)
+    .replace(/\{\{TABLE_SCHEMA\}\}/g, tableSchema);
 
-Here is the table schema:
-${tableSchema}
+  const operationPrompt = getPrompt(operation)
+    .replace(/\{\{TABLE_NAME\}\}/g, tableName)
+    .replace(/\{\{TABLE_SCHEMA\}\}/g, tableSchema);
 
-The table always has these core columns:
-- id: INTEGER PRIMARY KEY (auto-increment)
-- memory: TEXT (the main memory content)
-- embedding: FLOAT32(1536) (vector embedding for semantic search - you don't need to set this, it's handled automatically)
-- created_at: TEXT (ISO 8601 timestamp, set automatically on insert)
-
-Any other columns in the schema are freeform fields that can be used to categorize and filter memories.`;
-
-  switch (operation) {
-    case "remember":
-      return `${baseContext}
-
-Your task is to STORE a new memory. The user will describe what they want to remember.
-
-Instructions:
-1. First, use search_memories to check if a similar memory already exists.
-2. If a very similar memory exists, use update_memory to update it instead of creating a duplicate.
-3. If the memory is new, use insert_memory to store it.
-4. Extract any relevant field values from the user's description and populate the freeform fields.
-5. Keep memory text concise but complete - capture the essential information.
-6. After performing the operation, respond with a brief confirmation of what was done.
-
-REJECTION RULES - You MUST reject the memory using reject_operation if ANY of these apply:
-- The memory is nonsensical, garbled, or clearly not meaningful information
-- The memory directly contradicts an existing memory without acknowledging the change
-- The memory is an exact or near-exact duplicate of an existing one (use search first!)
-- The memory contains insufficient detail to be useful when recalled later
-- The memory appears to be test data, placeholder text, or junk content
-- The memory is clearly inappropriate or harmful content
-
-When rejecting, always provide a specific reason and category. A rejection is a valid and expected outcome.`;
-
-    case "forget":
-      return `${baseContext}
-
-Your task is to REMOVE or MODIFY memories. The user will describe what they want to forget or change.
-
-Instructions:
-1. First, search for the relevant memories using search_memories or sql_query.
-2. Identify which memories should be deleted or modified.
-3. Use delete_memory to remove memories, or update_memory to modify them.
-4. Be careful not to delete unrelated memories.
-5. If the request is ambiguous, err on the side of caution and use reject_operation.
-6. After performing the operation, respond with a brief confirmation of what was done.`;
-
-    case "recall":
-      return `${baseContext}
-
-Your task is to RECALL memories. The user will describe what they want to remember. Do NOT modify any data.
-
-Instructions:
-1. Use search_memories for semantic search when the query is conceptual.
-2. Use sql_query for precise lookups (by date, specific field values, counts, etc.).
-3. You may combine both approaches for comprehensive results.
-4. Present the recalled memories in a clear, useful format.
-5. If no relevant memories are found, say so clearly.
-6. Do NOT use insert_memory, update_memory, or delete_memory during a recall operation.`;
-
-    case "process":
-      return `${baseContext}
-
-Your task is to PROCESS and REFINE existing memories. Review stored memories and improve their quality.
-
-Instructions:
-1. Start by recalling ALL memories using sql_query (SELECT * FROM ${tableName} ORDER BY created_at DESC).
-2. Analyze the memories for:
-   - Duplicates or near-duplicates that should be merged
-   - Memories that are vague and could benefit from more detail
-   - Memories that may be outdated or contradictory
-   - Missing field values that could be inferred or asked about
-   - Memories that could be better organized or categorized
-3. Use ask_question to ask the user clarifying questions that would help improve memory quality.
-   - Group related questions together rather than asking one at a time
-   - Provide context about which memories the question relates to
-   - Focus on the most impactful improvements first
-4. Based on user answers (provided as follow-up context), use update_memory to refine memories or delete_memory to remove duplicates/outdated entries.
-5. You may also use insert_memory if the user's answers reveal new information worth storing.
-6. After processing, summarize what was changed, merged, or deleted.
-
-The goal is to maintain a clean, high-quality memory store with no redundancy and maximum usefulness.`;
-  }
+  return `${basePrompt}\n\n${operationPrompt}`;
 }
 
 function getToolsForOperation(operation: MemoryOperation): OpenAI.Chat.Completions.ChatCompletionTool[] {
