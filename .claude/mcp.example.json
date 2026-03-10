@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "node",
+      "args": ["/path/to/memory-mcp/build/index.js"],
+      "env": {
+        "TURSO_DATABASE_URL": "libsql://your-db.turso.io",
+        "TURSO_AUTH_TOKEN": "your-token",
+        "OPENAI_API_KEY": "sk-your-key"
+      }
+    }
+  }
+}
