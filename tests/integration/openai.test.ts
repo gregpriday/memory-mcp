@@ -20,7 +20,26 @@ vi.setConfig({ testTimeout: 15000 });
 const SKIP = !process.env.OPENAI_API_KEY;
 const MODEL = "gpt-5-mini"; // Use mini for integration tests to save cost
 
-// Shared tool definitions — mirrors src/llm.ts but imported here to keep tests self-contained
+// Structured filter schema — shared between search_memories and structured_query
+const filterSchema = {
+  type: "object" as const,
+  properties: {
+    field: { type: "string" as const, description: "Column name to filter on." },
+    operator: {
+      type: "string" as const,
+      enum: ["eq", "neq", "gt", "gte", "lt", "lte", "like", "in", "is_null", "is_not_null"],
+      description: "Comparison operator.",
+    },
+    value: {
+      type: ["string", "number", "null"] as const,
+      description: "Value to compare against. Null for is_null/is_not_null.",
+    },
+  },
+  required: ["field", "operator", "value"] as const,
+  additionalProperties: false as const,
+};
+
+// Shared tool definitions — mirrors src/llm.ts but kept self-contained for integration tests
 const memoryTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
@@ -32,9 +51,13 @@ const memoryTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
         properties: {
           search_text: { type: "string", description: "Text to search for semantically." },
           limit: { type: ["number", "null"], description: "Max results. Null = default 10." },
-          sql_filter: { type: ["string", "null"], description: "Optional WHERE clause. Null = no filter." },
+          filters: {
+            type: ["array", "null"],
+            items: filterSchema,
+            description: "Optional structured filters. Null = no filters.",
+          },
         },
-        required: ["search_text", "limit", "sql_filter"],
+        required: ["search_text", "limit", "filters"],
         additionalProperties: false,
       },
       strict: true,
@@ -43,15 +66,30 @@ const memoryTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "sql_query",
-      description: "Execute a read-only SQL SELECT query against the memories table.",
+      name: "structured_query",
+      description: "Query memories using structured filters. For exact lookups, date-based queries, counting.",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "The SQL SELECT query." },
-          explanation: { type: "string", description: "Brief explanation." },
+          filters: {
+            type: ["array", "null"],
+            items: filterSchema,
+            description: "Structured filters. Null = select all rows.",
+          },
+          order_by: {
+            type: ["object", "null"],
+            properties: {
+              field: { type: "string", description: "Column to sort by." },
+              direction: { type: "string", enum: ["asc", "desc"], description: "Sort direction." },
+            },
+            required: ["field", "direction"],
+            additionalProperties: false,
+            description: "Optional ordering. Null = default order.",
+          },
+          limit: { type: ["number", "null"], description: "Max rows. Null = no limit." },
+          explanation: { type: "string", description: "Brief explanation of what this query does." },
         },
-        required: ["query", "explanation"],
+        required: ["filters", "order_by", "limit", "explanation"],
         additionalProperties: false,
       },
       strict: true,
@@ -158,7 +196,7 @@ function getToolsForOperation(operation: MemoryOperation) {
   switch (operation) {
     case "recall":
       return memoryTools.filter(
-        (t) => ["search_memories", "sql_query", "reject_operation"].includes(t.function.name)
+        (t) => ["search_memories", "structured_query", "reject_operation"].includes(t.function.name)
       );
     case "process":
       return memoryTools;
@@ -302,7 +340,7 @@ describe.skipIf(SKIP)("OpenAI integration — recall operation", () => {
     expect(args.search_text).toBeTruthy();
   });
 
-  it("should use sql_query for structured recall", async () => {
+  it("should use structured_query for structured recall", async () => {
     const message = await callLLM(
       "recall",
       "How many memories do we have about high importance users?"
@@ -311,14 +349,13 @@ describe.skipIf(SKIP)("OpenAI integration — recall operation", () => {
     expect(message.tool_calls).toBeTruthy();
     const toolNames = message.tool_calls!.map((tc) => tc.function.name);
 
-    // Should use sql_query for a count-based question or search_memories
-    const usesStructured = toolNames.includes("sql_query") || toolNames.includes("search_memories");
+    // Should use structured_query for a count-based question or search_memories
+    const usesStructured = toolNames.includes("structured_query") || toolNames.includes("search_memories");
     expect(usesStructured).toBe(true);
 
-    if (toolNames.includes("sql_query")) {
-      const sqlCall = message.tool_calls!.find((tc) => tc.function.name === "sql_query")!;
-      const args = JSON.parse(sqlCall.function.arguments);
-      expect(args.query.toUpperCase()).toContain("SELECT");
+    if (toolNames.includes("structured_query")) {
+      const queryCall = message.tool_calls!.find((tc) => tc.function.name === "structured_query")!;
+      const args = JSON.parse(queryCall.function.arguments);
       expect(args.explanation).toBeTruthy();
     }
   });
@@ -353,7 +390,7 @@ describe.skipIf(SKIP)("OpenAI integration — forget operation", () => {
     expect(message.tool_calls).toBeTruthy();
     const toolNames = message.tool_calls!.map((tc) => tc.function.name);
     // Should search first to find what to delete
-    const searchesFirst = toolNames.includes("search_memories") || toolNames.includes("sql_query");
+    const searchesFirst = toolNames.includes("search_memories") || toolNames.includes("structured_query");
     expect(searchesFirst).toBe(true);
   });
 
@@ -366,7 +403,7 @@ describe.skipIf(SKIP)("OpenAI integration — forget operation", () => {
     expect(message.tool_calls).toBeTruthy();
     const toolNames = message.tool_calls!.map((tc) => tc.function.name);
     // Should either reject outright or search (then find nothing to delete)
-    const conservative = toolNames.includes("reject_operation") || toolNames.includes("search_memories") || toolNames.includes("sql_query");
+    const conservative = toolNames.includes("reject_operation") || toolNames.includes("search_memories") || toolNames.includes("structured_query");
     expect(conservative).toBe(true);
   });
 });
@@ -384,8 +421,8 @@ describe.skipIf(SKIP)("OpenAI integration — process operation", () => {
 
     expect(message.tool_calls).toBeTruthy();
     const toolNames = message.tool_calls!.map((tc) => tc.function.name);
-    // Should start with sql_query to fetch all memories
-    expect(toolNames.includes("sql_query") || toolNames.includes("search_memories")).toBe(true);
+    // Should start with structured_query to fetch all memories
+    expect(toolNames.includes("structured_query") || toolNames.includes("search_memories")).toBe(true);
   });
 
   it("should have access to ask_question tool", async () => {
@@ -428,11 +465,19 @@ describe.skipIf(SKIP)("OpenAI integration — system prompt content", () => {
     expect(prompt).toContain("err on the side of caution");
   });
 
-  it("process prompt should reference the table name in SQL example", () => {
+  it("process prompt should reference structured_query approach", () => {
     const prompt = buildSystemPrompt("process", TEST_TABLE_SCHEMA, "github_users");
-    expect(prompt).toContain("SELECT * FROM github_users");
+    expect(prompt).toContain("structured_query");
     expect(prompt).toContain("ask_question");
     expect(prompt).toContain("PROCESS and REFINE");
+  });
+
+  it("base prompt should document structured filters", () => {
+    const prompt = buildSystemPrompt("recall", TEST_TABLE_SCHEMA, "github_users");
+    expect(prompt).toContain("Structured filters");
+    expect(prompt).toContain("search_memories");
+    expect(prompt).toContain("structured_query");
+    expect(prompt).toContain("operator");
   });
 
   it("all operations should include the base context", () => {

@@ -6,6 +6,14 @@ vi.mock("../src/db.js", () => ({
     "CREATE TABLE test (id INTEGER PRIMARY KEY, memory TEXT, embedding FLOAT32(1536), created_at TEXT, category TEXT)"
   ),
   executeQuery: vi.fn().mockResolvedValue({ rows: [], lastInsertRowid: 1n }),
+  getTableColumns: vi.fn().mockResolvedValue([
+    { name: "id", type: "INTEGER" },
+    { name: "memory", type: "TEXT" },
+    { name: "embedding", type: "FLOAT32(1536)" },
+    { name: "created_at", type: "TEXT" },
+    { name: "category", type: "TEXT" },
+  ]),
+  getTableMeta: vi.fn().mockResolvedValue({ tableName: "test", embeddedFields: ["memory"] }),
   tableExists: vi.fn().mockResolvedValue(true),
 }));
 
@@ -275,9 +283,11 @@ describe("Process operation", () => {
                 id: "call_0_0",
                 type: "function",
                 function: {
-                  name: "sql_query",
+                  name: "structured_query",
                   arguments: JSON.stringify({
-                    query: "SELECT * FROM test ORDER BY created_at DESC",
+                    filters: null,
+                    order_by: { field: "created_at", direction: "desc" },
+                    limit: null,
                     explanation: "Fetch all memories for review",
                   }),
                 },
@@ -442,9 +452,11 @@ describe("Agentic loop edge cases", () => {
                 id: "call_x",
                 type: "function",
                 function: {
-                  name: "sql_query",
+                  name: "structured_query",
                   arguments: JSON.stringify({
-                    query: "SELECT * FROM test",
+                    filters: null,
+                    order_by: null,
+                    limit: null,
                     explanation: "fetch all",
                   }),
                 },

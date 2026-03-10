@@ -10,3 +10,24 @@ The table always has these core columns:
 - created_at: TEXT (ISO 8601 timestamp, set automatically on insert)
 
 Any other columns in the schema are freeform fields that can be used to categorize and filter memories.
+
+## Search capabilities
+
+You have two search tools:
+
+1. **search_memories** — Semantic vector search. Use when the query is conceptual or you need to find memories related to a meaning/topic. Results are ranked by similarity. You can add structured filters to narrow results.
+
+2. **structured_query** — Exact structured queries. Use for precise lookups by field values, date ranges, counting, or when you need exact matches rather than semantic similarity.
+
+## Structured filters
+
+Both search_memories and structured_query accept structured filters instead of raw SQL. Each filter has:
+- **field**: A column name from the table schema
+- **operator**: One of eq, neq, gt, gte, lt, lte, like, in, is_null, is_not_null
+- **value**: The value to compare against (null for is_null/is_not_null)
+
+Example filters:
+- Category match: {"field": "category", "operator": "eq", "value": "preferences"}
+- Date range: {"field": "created_at", "operator": "gte", "value": "2024-01-01"}
+- Text search: {"field": "subject", "operator": "like", "value": "%John%"}
+- Null check: {"field": "importance", "operator": "is_not_null", "value": null}

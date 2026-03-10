@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { executeQuery, getTableSchema } from "./db.js";
+import { executeQuery, getTableSchema, getTableColumns, getTableMeta } from "./db.js";
 import { generateEmbedding } from "./embeddings.js";
 import {
   processMemoryOperation,
@@ -8,6 +8,11 @@ import {
   type LLMResult,
   type MemoryOperation,
 } from "./llm.js";
+import {
+  buildSelectQuery,
+  buildVectorSearchQuery,
+  type QueryFilter,
+} from "./query-builder.js";
 
 const MAX_TOOL_ROUNDS = 5;
 
@@ -29,52 +34,82 @@ export interface MemoryResult {
   data?: Record<string, unknown>[];
 }
 
+/**
+ * Build the text to embed from multiple fields.
+ * Concatenates field values with labels for context.
+ * Example: "title: My Project\nbody: A description of the project"
+ */
+function buildEmbeddingText(
+  embeddedFields: string[],
+  fieldValues: Record<string, string | number | null>
+): string {
+  if (embeddedFields.length === 1) {
+    // Single field — just use its value directly
+    const value = fieldValues[embeddedFields[0]];
+    return value != null ? String(value) : "";
+  }
+
+  // Multiple fields — concatenate with labels
+  const parts: string[] = [];
+  for (const field of embeddedFields) {
+    const value = fieldValues[field];
+    if (value != null && String(value).length > 0) {
+      parts.push(`${field}: ${value}`);
+    }
+  }
+  return parts.join("\n");
+}
+
+async function getValidColumns(tableName: string): Promise<string[]> {
+  const columns = await getTableColumns(tableName);
+  return columns.map((c) => c.name).filter((c) => c !== "embedding");
+}
+
 async function executeToolCall(
   toolCall: ToolCall,
   tableName: string
 ): Promise<string> {
   switch (toolCall.name) {
     case "search_memories": {
-      const { search_text, sql_filter } = toolCall.args;
+      const { search_text, filters } = toolCall.args;
       const limit = toolCall.args.limit ?? 10;
       const embedding = await generateEmbedding(search_text);
       const vectorStr = JSON.stringify(embedding);
 
-      // Fetch column list once to build SELECT (exclude embedding blob)
-      const schemaResult = await executeQuery(`PRAGMA table_info(${tableName})`, []);
-      const columns = schemaResult.rows
-        .map((r) => r.name as string)
-        .filter((c) => c !== "embedding");
+      const validColumns = await getValidColumns(tableName);
 
-      let sql = `
-        SELECT ${columns.map((c) => `m.${c}`).join(", ")},
-          vector_distance_cos(m.embedding, vector32(?)) AS distance
-        FROM vector_top_k('idx_${tableName}_embedding', vector32(?), ?) AS v
-        JOIN ${tableName} AS m ON m.rowid = v.id
-      `;
+      const parsedFilters: QueryFilter[] | undefined =
+        filters && filters.length > 0 ? filters : undefined;
 
-      const queryArgs: (string | number)[] = [vectorStr, vectorStr, limit];
+      const query = buildVectorSearchQuery(
+        tableName,
+        validColumns,
+        vectorStr,
+        limit,
+        parsedFilters,
+        validColumns
+      );
 
-      if (sql_filter) {
-        sql += ` WHERE ${sql_filter}`;
-      }
-
-      sql += " ORDER BY distance ASC";
-
-      const result = await executeQuery(sql, queryArgs);
+      const result = await executeQuery(query.sql, query.params);
       return JSON.stringify(result.rows);
     }
 
-    case "sql_query": {
-      const { query } = toolCall.args;
-      // Validate it's a SELECT query
-      const trimmed = query.trim().toUpperCase();
-      if (!trimmed.startsWith("SELECT")) {
-        return JSON.stringify({
-          error: "Only SELECT queries are allowed in sql_query.",
-        });
-      }
-      const result = await executeQuery(query);
+    case "structured_query": {
+      const { filters, order_by, limit } = toolCall.args;
+      const validColumns = await getValidColumns(tableName);
+
+      const query = buildSelectQuery(
+        tableName,
+        validColumns,
+        {
+          filters: filters ?? undefined,
+          order_by: order_by ?? undefined,
+          limit: limit ?? undefined,
+        },
+        validColumns
+      );
+
+      const result = await executeQuery(query.sql, query.params);
       return JSON.stringify(result.rows);
     }
 
@@ -82,23 +117,31 @@ async function executeToolCall(
       const { memory, fields: fieldsStr } = toolCall.args;
       const fields = fieldsStr ? JSON.parse(fieldsStr) : {};
 
-      // Generate embedding
-      const embedding = await generateEmbedding(memory);
+      // Get embedded fields config to determine what to embed
+      const meta = await getTableMeta(tableName);
+      const allFieldValues: Record<string, string | number | null> = {
+        memory,
+        ...fields,
+      };
+
+      // Generate embedding from the configured fields
+      const embeddingText = buildEmbeddingText(meta.embeddedFields, allFieldValues);
+      const embedding = await generateEmbedding(embeddingText);
       const vectorStr = JSON.stringify(embedding);
 
       // Build insert
-      const allFields: Record<string, string | number | null> = {
+      const insertFields: Record<string, string | number | null> = {
         memory,
         created_at: new Date().toISOString(),
         ...fields,
       };
 
-      const columns = [...Object.keys(allFields), "embedding"];
+      const columns = [...Object.keys(insertFields), "embedding"];
       const placeholders = [
-        ...Object.keys(allFields).map(() => "?"),
+        ...Object.keys(insertFields).map(() => "?"),
         "vector32(?)",
       ];
-      const values = [...Object.values(allFields), vectorStr];
+      const values = [...Object.values(insertFields), vectorStr];
 
       const sql = `INSERT INTO ${tableName} (${columns.join(", ")}) VALUES (${placeholders.join(", ")})`;
       const result = await executeQuery(sql, values as (string | number | null)[]);
@@ -120,17 +163,43 @@ async function executeToolCall(
       if (memory && memory.length > 0) {
         updates.push("memory = ?");
         values.push(memory);
-
-        // Re-generate embedding
-        const embedding = await generateEmbedding(memory);
-        const vectorStr = JSON.stringify(embedding);
-        updates.push("embedding = vector32(?)");
-        values.push(vectorStr);
       }
 
       for (const [key, value] of Object.entries(fields)) {
         updates.push(`${key} = ?`);
         values.push(value as string | number | null);
+      }
+
+      // Re-generate embedding if any embedded fields changed
+      if (memory && memory.length > 0) {
+        const meta = await getTableMeta(tableName);
+
+        // Fetch current row to get all embedded field values
+        const currentRow = await executeQuery(
+          `SELECT * FROM ${tableName} WHERE id = ?`,
+          [id]
+        );
+
+        if (currentRow.rows.length > 0) {
+          const currentValues = currentRow.rows[0] as Record<string, unknown>;
+          const allFieldValues: Record<string, string | number | null> = {};
+
+          for (const ef of meta.embeddedFields) {
+            if (ef === "memory") {
+              allFieldValues[ef] = memory; // Use new memory value
+            } else if (ef in fields) {
+              allFieldValues[ef] = fields[ef] as string | number | null;
+            } else {
+              allFieldValues[ef] = currentValues[ef] as string | number | null;
+            }
+          }
+
+          const embeddingText = buildEmbeddingText(meta.embeddedFields, allFieldValues);
+          const embedding = await generateEmbedding(embeddingText);
+          const vectorStr = JSON.stringify(embedding);
+          updates.push("embedding = vector32(?)");
+          values.push(vectorStr);
+        }
       }
 
       if (updates.length === 0) {

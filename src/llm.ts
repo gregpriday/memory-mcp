@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import type { QueryFilter, OrderBy } from "./query-builder.js";
 
 export const MODEL_FULL = "gpt-5";
 // MODEL_MINI available for lower-cost operations if needed in future
@@ -39,6 +40,29 @@ function getOpenAI(): OpenAI {
   return openaiClient;
 }
 
+// Structured filter schema — shared between search_memories and structured_query
+const filterSchema: OpenAI.Chat.Completions.ChatCompletionTool["function"]["parameters"] = {
+  type: "object",
+  properties: {
+    field: {
+      type: "string",
+      description: "The column name to filter on (must be a valid column in the table schema).",
+    },
+    operator: {
+      type: "string",
+      enum: ["eq", "neq", "gt", "gte", "lt", "lte", "like", "in", "is_null", "is_not_null"],
+      description: "The comparison operator.",
+    },
+    value: {
+      type: ["string", "number", "null"],
+      description:
+        "The value to compare against. For 'in' operator, pass a comma-separated string that will be split. For 'is_null'/'is_not_null', pass null.",
+    },
+  },
+  required: ["field", "operator", "value"],
+  additionalProperties: false,
+};
+
 // Tool definitions for the LLM to use when processing memory operations
 const memoryTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
@@ -46,27 +70,28 @@ const memoryTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "search_memories",
       description:
-        "Search for memories using semantic similarity (vector search). Use this when you need to find memories related to a concept, topic, or entity.",
+        "Search for memories using semantic similarity (vector search). Use this when you need to find memories related to a concept, topic, or entity. Results are ranked by semantic similarity.",
       parameters: {
         type: "object",
         properties: {
           search_text: {
             type: "string",
             description:
-              "The text to search for semantically. This will be converted to an embedding and compared against stored memories.",
+              "The text to search for semantically. This will be converted to an embedding and compared against stored memory embeddings.",
           },
           limit: {
             type: ["number", "null"],
             description:
               "Maximum number of results to return. Pass null to use the default of 10.",
           },
-          sql_filter: {
-            type: ["string", "null"],
+          filters: {
+            type: ["array", "null"],
+            items: filterSchema,
             description:
-              "Optional SQL WHERE clause filter on exact column values (e.g., \"category = 'user_info'\"). Only equality and simple AND/OR comparisons on known columns are allowed. Do not include the WHERE keyword. Pass null for no filter.",
+              "Optional structured filters to narrow results by column values (e.g., filter by category, subject, date). Pass null for no filters.",
           },
         },
-        required: ["search_text", "limit", "sql_filter"],
+        required: ["search_text", "limit", "filters"],
         additionalProperties: false,
       },
       strict: true,
@@ -75,23 +100,43 @@ const memoryTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "sql_query",
+      name: "structured_query",
       description:
-        "Execute a direct SQL SELECT query against the memories table. Use this for exact lookups, date-based queries, counting, or when you need precise filtering that vector search alone can't provide.",
+        "Query memories using structured filters. Use this for exact lookups, date-based queries, counting, or when you need precise filtering without semantic search. Only SELECT operations are supported.",
       parameters: {
         type: "object",
         properties: {
-          query: {
-            type: "string",
+          filters: {
+            type: ["array", "null"],
+            items: filterSchema,
             description:
-              "The full SQL SELECT query to execute. The table name will be provided in context. Only SELECT queries are allowed.",
+              "Structured filters to apply. Each filter specifies a field, operator, and value. Pass null to select all rows.",
+          },
+          order_by: {
+            type: ["object", "null"],
+            properties: {
+              field: { type: "string", description: "Column to sort by." },
+              direction: {
+                type: "string",
+                enum: ["asc", "desc"],
+                description: "Sort direction.",
+              },
+            },
+            required: ["field", "direction"],
+            additionalProperties: false,
+            description: "Optional ordering. Pass null for default order.",
+          },
+          limit: {
+            type: ["number", "null"],
+            description:
+              "Maximum number of rows to return. Pass null for no limit.",
           },
           explanation: {
             type: "string",
             description: "Brief explanation of what this query does.",
           },
         },
-        required: ["query", "explanation"],
+        required: ["filters", "order_by", "limit", "explanation"],
         additionalProperties: false,
       },
       strict: true,
@@ -227,8 +272,8 @@ const memoryTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 ];
 
 export type ToolCall =
-  | { name: "search_memories"; args: { search_text: string; limit?: number; sql_filter?: string } }
-  | { name: "sql_query"; args: { query: string; explanation: string } }
+  | { name: "search_memories"; args: { search_text: string; limit?: number | null; filters?: QueryFilter[] | null } }
+  | { name: "structured_query"; args: { filters?: QueryFilter[] | null; order_by?: OrderBy | null; limit?: number | null; explanation: string } }
   | { name: "insert_memory"; args: { memory: string; fields: string } }
   | { name: "update_memory"; args: { id: number; memory: string; fields: string } }
   | { name: "delete_memory"; args: { id: number; reason: string } }
@@ -264,7 +309,7 @@ function getToolsForOperation(operation: MemoryOperation): OpenAI.Chat.Completio
       return memoryTools.filter(
         (t) =>
           t.function.name === "search_memories" ||
-          t.function.name === "sql_query" ||
+          t.function.name === "structured_query" ||
           t.function.name === "reject_operation"
       );
     case "process":
@@ -280,11 +325,11 @@ function getToolsForOperation(operation: MemoryOperation): OpenAI.Chat.Completio
 function getModelForOperation(operation: MemoryOperation): string {
   switch (operation) {
     case "process":
-      return MODEL_FULL; // Full model for the complex analysis in process
+      return MODEL_FULL;
     case "remember":
     case "forget":
     case "recall":
-      return MODEL_FULL; // Full model for all operations since token costs are not significant
+      return MODEL_FULL;
   }
 }
 

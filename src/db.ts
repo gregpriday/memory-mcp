@@ -72,3 +72,62 @@ export async function tableExists(table: string): Promise<boolean> {
   });
   return result.rows.length > 0;
 }
+
+// --- Table metadata ---
+
+export interface TableMeta {
+  tableName: string;
+  embeddedFields: string[];
+}
+
+export async function ensureMetaTable(): Promise<void> {
+  const db = getClient();
+  await db.execute({
+    sql: `CREATE TABLE IF NOT EXISTS _memory_meta (
+      table_name TEXT PRIMARY KEY,
+      embedded_fields TEXT NOT NULL DEFAULT '["memory"]',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    args: [],
+  });
+}
+
+export async function setTableMeta(
+  tableName: string,
+  embeddedFields: string[]
+): Promise<void> {
+  await ensureMetaTable();
+  const db = getClient();
+  await db.execute({
+    sql: `INSERT OR REPLACE INTO _memory_meta (table_name, embedded_fields) VALUES (?, ?)`,
+    args: [tableName, JSON.stringify(embeddedFields)],
+  });
+}
+
+export async function getTableMeta(tableName: string): Promise<TableMeta> {
+  await ensureMetaTable();
+  const db = getClient();
+  const result = await db.execute({
+    sql: `SELECT embedded_fields FROM _memory_meta WHERE table_name = ?`,
+    args: [tableName],
+  });
+
+  if (result.rows.length === 0) {
+    // Default: just the memory field
+    return { tableName, embeddedFields: ["memory"] };
+  }
+
+  return {
+    tableName,
+    embeddedFields: JSON.parse(result.rows[0].embedded_fields as string),
+  };
+}
+
+export async function deleteTableMeta(tableName: string): Promise<void> {
+  await ensureMetaTable();
+  const db = getClient();
+  await db.execute({
+    sql: `DELETE FROM _memory_meta WHERE table_name = ?`,
+    args: [tableName],
+  });
+}

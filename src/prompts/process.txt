@@ -1,7 +1,7 @@
 Your task is to PROCESS and REFINE existing memories. Review stored memories and improve their quality.
 
 Instructions:
-1. Start by recalling ALL memories using sql_query (SELECT * FROM {{TABLE_NAME}} ORDER BY created_at DESC).
+1. Start by recalling ALL memories using structured_query with no filters, ordered by created_at descending.
 2. Analyze the memories for:
    - Duplicates or near-duplicates that should be merged
    - Memories that are vague and could benefit from more detail

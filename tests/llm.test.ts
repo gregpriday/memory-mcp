@@ -93,7 +93,7 @@ describe("LLM system prompts", () => {
     );
 
     expect(toolNames).toContain("search_memories");
-    expect(toolNames).toContain("sql_query");
+    expect(toolNames).toContain("structured_query");
     expect(toolNames).toContain("reject_operation");
     expect(toolNames).not.toContain("insert_memory");
     expect(toolNames).not.toContain("update_memory");
@@ -120,7 +120,7 @@ describe("LLM system prompts", () => {
                 type: "function",
                 function: {
                   name: "search_memories",
-                  arguments: JSON.stringify({ search_text: "TypeScript", limit: null, sql_filter: null }),
+                  arguments: JSON.stringify({ search_text: "TypeScript", limit: null, filters: null }),
                 },
               },
             ],
@@ -142,7 +142,7 @@ describe("LLM system prompts", () => {
     );
 
     expect(toolNames).toContain("search_memories");
-    expect(toolNames).toContain("sql_query");
+    expect(toolNames).toContain("structured_query");
     expect(toolNames).toContain("insert_memory");
     expect(toolNames).toContain("update_memory");
     expect(toolNames).toContain("delete_memory");
@@ -182,7 +182,7 @@ describe("LLM system prompts", () => {
     );
 
     expect(toolNames).toContain("search_memories");
-    expect(toolNames).toContain("sql_query");
+    expect(toolNames).toContain("structured_query");
     expect(toolNames).toContain("insert_memory");
     expect(toolNames).toContain("update_memory");
     expect(toolNames).toContain("delete_memory");
@@ -194,7 +194,7 @@ describe("LLM system prompts", () => {
 });
 
 describe("Tool call parsing", () => {
-  it("should parse search_memories tool call with all strict-mode fields", async () => {
+  it("should parse search_memories tool call with structured filters", async () => {
     const { processMemoryOperation } = await import("../src/llm.js");
 
     process.env.OPENAI_API_KEY = "test-key";
@@ -216,7 +216,7 @@ describe("Tool call parsing", () => {
                   arguments: JSON.stringify({
                     search_text: "user preferences",
                     limit: 5,
-                    sql_filter: "category = 'preferences'",
+                    filters: [{ field: "category", operator: "eq", value: "preferences" }],
                   }),
                 },
               },
@@ -237,14 +237,16 @@ describe("Tool call parsing", () => {
     const args = result.toolCalls[0].args as {
       search_text: string;
       limit: number;
-      sql_filter: string;
+      filters: any[];
     };
     expect(args.search_text).toBe("user preferences");
     expect(args.limit).toBe(5);
-    expect(args.sql_filter).toBe("category = 'preferences'");
+    expect(args.filters[0].field).toBe("category");
+    expect(args.filters[0].operator).toBe("eq");
+    expect(args.filters[0].value).toBe("preferences");
   });
 
-  it("search_memories strict schema should require limit and sql_filter (as nullable)", async () => {
+  it("search_memories strict schema should require limit and filters (as nullable)", async () => {
     const { processMemoryOperation } = await import("../src/llm.js");
     process.env.OPENAI_API_KEY = "test-key";
     const OpenAI = await import("openai");
@@ -260,9 +262,28 @@ describe("Tool call parsing", () => {
     const searchTool = callArgs.tools.find((t: any) => t.function.name === "search_memories");
     expect(searchTool.function.strict).toBe(true);
     expect(searchTool.function.parameters.required).toContain("limit");
-    expect(searchTool.function.parameters.required).toContain("sql_filter");
+    expect(searchTool.function.parameters.required).toContain("filters");
     expect(searchTool.function.parameters.properties.limit.type).toContain("null");
-    expect(searchTool.function.parameters.properties.sql_filter.type).toContain("null");
+    expect(searchTool.function.parameters.properties.filters.type).toContain("null");
+  });
+
+  it("should have structured_query tool instead of sql_query", async () => {
+    const { processMemoryOperation } = await import("../src/llm.js");
+    process.env.OPENAI_API_KEY = "test-key";
+    const OpenAI = await import("openai");
+    const mockCreate = (OpenAI as any).__mockCreate;
+
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: "ok", tool_calls: null } }],
+    });
+
+    await processMemoryOperation("recall", "test", "CREATE TABLE t (id INTEGER PRIMARY KEY, memory TEXT)", "t");
+
+    const callArgs = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0];
+    const toolNames = callArgs.tools.map((t: any) => t.function.name);
+
+    expect(toolNames).toContain("structured_query");
+    expect(toolNames).not.toContain("sql_query");
   });
 
   it("should handle reject_operation with category", async () => {
@@ -383,5 +404,33 @@ describe("Rejection rules in system prompt", () => {
     expect(systemPrompt).toContain("duplicate");
     expect(systemPrompt).toContain("insufficient detail");
     expect(systemPrompt).toContain("reject_operation");
+  });
+
+  it("should include structured filter documentation in system prompt", async () => {
+    const { processMemoryOperation } = await import("../src/llm.js");
+
+    process.env.OPENAI_API_KEY = "test-key";
+
+    const OpenAI = await import("openai");
+    const mockCreate = (OpenAI as any).__mockCreate;
+
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: "ok", tool_calls: null } }],
+    });
+
+    await processMemoryOperation(
+      "recall",
+      "test",
+      "CREATE TABLE t (id INTEGER PRIMARY KEY, memory TEXT)",
+      "t"
+    );
+
+    const callArgs = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0];
+    const systemPrompt = callArgs.messages[0].content;
+
+    expect(systemPrompt).toContain("Structured filters");
+    expect(systemPrompt).toContain("search_memories");
+    expect(systemPrompt).toContain("structured_query");
+    expect(systemPrompt).toContain("operator");
   });
 });
