@@ -6,6 +6,40 @@
   "bin": {
     "memory-mcp": "./build/index.js"
   },
+  "files": [
+    "build/",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gregpriday/memory-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gregpriday/memory-mcp/issues"
+  },
+  "homepage": "https://github.com/gregpriday/memory-mcp#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "memory",
+    "turso",
+    "libsql",
+    "openai",
+    "embeddings",
+    "vector-search",
+    "ai",
+    "llm",
+    "claude"
+  ],
+  "author": "Greg Priday <greg@siteorigin.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc && cp -r src/prompts build/prompts",
     "start": "node build/index.js",
