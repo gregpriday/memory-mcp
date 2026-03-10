@@ -1,5 +1,5 @@
 {
-  "name": "@gregpriday/memory-mcp",
+  "name": "@gpriday/memory-mcp",
   "version": "0.1.0",
   "description": "A memory MCP server backed by Turso (libSQL) with OpenAI embeddings and LLM-powered query generation",
   "type": "module",
