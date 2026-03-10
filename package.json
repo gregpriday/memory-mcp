@@ -4,7 +4,7 @@
   "description": "A memory MCP server backed by Turso (libSQL) with OpenAI embeddings and LLM-powered query generation",
   "type": "module",
   "bin": {
-    "memory-mcp": "./build/index.js"
+    "memory-mcp": "build/index.js"
   },
   "files": [
     "build/",
@@ -41,7 +41,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && cp -r src/prompts build/prompts",
+    "build": "tsc && rm -rf build/prompts && cp -r src/prompts build/prompts",
     "start": "node build/index.js",
     "dev": "tsx src/index.ts",
     "test": "vitest run --exclude 'tests/integration/**'",
