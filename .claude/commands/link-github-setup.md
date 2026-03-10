@@ -30,7 +30,7 @@ console.log(tables.length ? tables.join(', ') : 'No tables found');
 "
 ```
 
-Warn the user if any of the target table names already exist.
+If any of the target table names already exist, skip those presets and inform the user. Do not attempt to create a table that already exists — `createMemoryTable` will throw an error.
 
 ## Step 3: Choose table presets
 
@@ -68,6 +68,7 @@ Track issue and PR context, decisions, and outcomes.
 | Column | Type | Description |
 |--------|------|-------------|
 | `issue_number` | INTEGER | GitHub issue or PR number |
+| `type` | TEXT | Whether this is an issue or pull_request |
 | `state` | TEXT | Current state (open, closed, merged, etc.) |
 | `labels` | TEXT | Comma-separated labels |
 | `author` | TEXT | Issue/PR author username |
@@ -79,6 +80,7 @@ import { createMemoryTable } from './src/table-setup.js';
 
 await createMemoryTable('github_issues', [
   { name: 'issue_number', type: 'INTEGER', description: 'GitHub issue or PR number' },
+  { name: 'type', type: 'TEXT', description: 'Whether this is an issue or pull_request' },
   { name: 'state', type: 'TEXT', description: 'Current state (open, closed, merged, etc.)' },
   { name: 'labels', type: 'TEXT', description: 'Comma-separated labels' },
   { name: 'author', type: 'TEXT', description: 'Issue/PR author username' },
@@ -135,6 +137,7 @@ After creating the tables, show the user how to use them with the MCP tools:
 
 ## Notes
 
+- Table names should be snake_case and descriptive. Column types must be TEXT, INTEGER, or REAL.
 - Table names can be customized. The presets above are suggestions.
 - You can create all three tables or just the ones relevant to your workflow.
 - Use `/list-tables` to see existing tables and `/drop-table <name>` to remove one.
